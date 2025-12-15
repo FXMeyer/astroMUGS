@@ -87,7 +87,7 @@ class Disk:
         """ B)
 	    Surface density of the gas. Unit: g.cm-2
 	    args:
-	    	-r:                     distance from the star [au]
+	    	-r: distance from the star [au]
         """
         if self.params.sigma_gas_ref != None:
             sigma_g = 2*self.params.sigma_gas_ref*(r/(self.params.ref_radius))**(-self.params.p_exp)  #2 or not??
@@ -144,7 +144,6 @@ class Disk:
         z = self.altitudes()	
         return (sigma/(mu*amu*H*autocm*np.sqrt(2.*np.pi)))\
                *np.exp(-(z)**2./(2.*(H)**2.))
-
 
     def density(self, x1, x2, x3=None):
         """ H)

@@ -2,8 +2,7 @@ import glob
 import os 
 import sys
 import shutil 
-import numpy as np
-
+import numpy as np 
 
 import astromugs
 from astromugs import radmc3d

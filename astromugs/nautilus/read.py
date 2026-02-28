@@ -1,8 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
-# import xarray as xr
-
+import xarray as xr
 
 
 def grid(radlist, nb_sizes, itime, species, chempath):
@@ -32,7 +31,7 @@ def grid(radlist, nb_sizes, itime, species, chempath):
                 'nH': nh,
                 'Tg': tg,
                 'nd': ab_d,  # Store the extracted grain sizes
-                'Td': td.transpose(grain_temperatures),  # Store the extracted grain sizes
+                'Td': td,  # Store the extracted grain sizes
                 'numberdens_species' : chem_numdens
             }
 

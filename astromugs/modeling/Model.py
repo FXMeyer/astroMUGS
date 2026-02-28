@@ -2,12 +2,14 @@ import glob
 import os 
 import sys
 import shutil 
-import numpy as np 
+import numpy as np
 
-import astromugs
+
 from astromugs import radmc3d
 from astromugs import nautilus
 from astromugs.modeling.Grid import Grid
+from astromugs.utils.struct import StructureParams
+from astromugs.utils.thermal import ThermalParams
 
 from astromugs.constants.constants import autocm, M_sun, R_sun, c, amu, mu, black_body
 from astromugs.modeling.InterstellarRadFields import InterstellarRadFields
@@ -18,8 +20,11 @@ import matplotlib.pyplot as plt
 class Model:
 
     def __init__(self):
-        self.grid = Grid()
+        self.params = StructureParams()
+        self.thermalparams = ThermalParams()
+        self.grid = Grid(params=self.params.disk)
         self.nautilus = nautilus
+        
 
     def run_continuum(self, nphot=1e4, \
                             write_control=False, \
@@ -34,9 +39,7 @@ class Model:
 
         # WRITE THERMAL FILES
         if write_control == True:
-            self.write_continuum(nphot_therm=nphot, \
-                            control=True, \
-                            **keywords)
+            self.write_continuum(control=True)
 
         self.run_thermal_radmc3d(nphot=nphot, **keywords)
 
@@ -177,9 +180,7 @@ class Model:
             print('create dust_temperature.inp')
 
 
-                
-
-
+            
     def localfield(self, nphot_mono=1e6, write_mcmono=False, run=True, **keywords):
 
         self.write_continuum(write=True,\
@@ -215,7 +216,7 @@ class Model:
         radmc3d.run.image(npix=npix, lambda_micron=lambda_micron, iline=iline, incl=incl, verbose=verbose, timelimit=7200)
 
 
-    def write_continuum(self, dens=False, grid=False, opac=False, control=False, stars=False, wave=False, mcmono=False, ext=False, **keywords):
+    def write_continuum(self, dens=False, grid=False, opac=False, control=False, stars=False, wave=False, mcmono=False, ext=False):
         #os.system("rm thermal/*.inp")
 
 
@@ -225,7 +226,7 @@ class Model:
         if control==True:
             print('\nWriting radmc3d.inp:')
             print('----------------------------')
-            radmc3d.write.control(**keywords)
+            radmc3d.write.control(self.thermalparams.control)
 
         if stars==True:
             print('\nWriting stars.inp:')
@@ -288,7 +289,7 @@ class Model:
             print('\nWARNING: no RADMC3D file are created.\n')
             print('----------------------------\n')
                 
-    def write_line(self, control=False, line=False, gasvelocity=False, gastemp=False, microturb=False, line_format='leiden', species='CO', star_mass=1, **keywords):
+    def write_line(self, control=False, line=False, gasvelocity=False, gastemp=False, microturb=False, line_format='leiden', species='CO', star_mass=1):
         #os.system("rm thermal/*.inp")
 
         if not os.path.exists('thermal'):
@@ -297,7 +298,7 @@ class Model:
         if control==True:
             print('\nWriting radmc3d.inp:')
             print('----------------------------')
-            radmc3d.write.control(**keywords)
+            radmc3d.write.control(self.thermalparams.control)
 
         if line==True:
             print('\nWriting line.inp:')

@@ -8,10 +8,24 @@ short description:  class Grid for young stellar objects modeling.
 _____________________________________________________________________________________________________________
 """
 
+
+
+from __future__ import annotations
+
 import numpy as np
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from astromugs.utils.struct import DiskParams #only need this for annotations
+    from astromugs.utils.thermal import ThermalParams #only need this for annotations
+
+    
+
 class Grid:
-    def __init__(self):
+    def __init__(self,
+                 params: DiskParams
+    ):
+        self.params = params
         self.density = []
         self.dustdensity = []
         self.gasdensity_chem = []
@@ -107,8 +121,13 @@ class Grid:
 
         return np.stack((x, y, z)), np.stack((w1, w2, w3))
 
-    def set_spherical_grid(self, rmin, rmax, nr, ntheta, nphi, log=True):
+    def set_spherical_grid(self, log=True):
         self.coordsystem = "spherical"
+        rmin = self.params.rin
+        rmax = self.params.rout
+        nr = self.params.nr
+        ntheta = self.params.ntheta
+        nphi = self.params.nphi
         if log:
             r_edge = np.logspace(np.log10(rmin), np.log10(rmax), nr, base=10)
         else:

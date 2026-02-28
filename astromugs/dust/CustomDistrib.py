@@ -14,9 +14,10 @@ from .. constants.constants import mu, amu
 
 class CustomDistrib:
 
-    def __init__(self, rho_m=2.5, units='microns', path='', filename=None):
+    def __init__(self, rho_m=2.5, units='microns', path='thermal/', filename="dust_sizes.inp"):
         """
-        The argument 'units' represents the size units given in the file. It can be microns, mm, cm, or m.  
+        The argument 'units' represents the size units given in the file. It can be microns, mm, cm, or m.
+        The file to read must be, and only be, in the form of a simple column, from smallest to largest size.  
         -------
         """
         self.filename = filename
@@ -32,7 +33,7 @@ class CustomDistrib:
             Numpy array (sizes). len(array) = (nb_sizes).
         """
         if (self.filename == None):
-            filename = "dust_sizes.in"
+            filename = "dust_sizes.inp"
         else:
             filename = self.filename
 

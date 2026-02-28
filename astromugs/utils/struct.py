@@ -16,6 +16,7 @@ def fmt_value(v, sci_threshold=1e3):
 # =======================================================
 # HTML REPR FOR JUPYTER (collapsible panel)
 # =======================================================
+
 def _html_repr(obj):
     """Return a collapsible HTML panel with MathJax-enabled table."""
     if not is_dataclass(obj):
@@ -182,6 +183,12 @@ class DiskParams:
         metadata={'desc': "[AU] inner radius"})
     rout: float = field(default=3.000e+02, 
         metadata={'desc': "[AU] Outer radius"})
+    nr: int = field(default=101, 
+        metadata={'desc': "Number of disk radii edges. Typically, add +1 to the number of radii you need e.g. 100 + 1."})
+    ntheta: int = field(default=181, 
+        metadata={'desc': "Number of edge theta angles. Typically, add 1 to the number of angles you need"})
+    nphi: int = field(default=2, 
+        metadata={'desc': "Number of phi angles"})
     schmidtnumber: float = field(default=1.000e+00, 
         metadata={'desc': "Schmidt number"})
     settfact: float = field(default=9.000e-01,

@@ -18,7 +18,7 @@ from scipy.integrate import trapezoid
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Optional, Literal, Any
 
-from astromugs.utils.params import EnvelopeParams
+from astromugs.utils.struct import EnvelopeParams
 from astromugs.constants.constants import (
     mu,
     autocm,

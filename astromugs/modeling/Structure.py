@@ -3,7 +3,7 @@ import os
 import inspect
 import numpy as np
 
-from astromugs.utils.params import StructureParams
+#from astromugs.utils.struct import StructureParams
 from astromugs.modeling.Model import Model
 from astromugs.modeling.Star import Star
 from astromugs.modeling.Disk import Disk
@@ -17,17 +17,21 @@ from astromugs.constants.constants import autocm, M_sun, R_sun, L_sun
 
 
 class Structure(Model):
-    def __init__(self):
-        self.params = StructureParams()
-        self.envelope_params = self.params.envelope
-        self.disk_params = self.params.disk
-
-        
+    #def __init__(self):
+        #self.params = StructureParams()
+        #self.envelope_params = self.params.envelope
+        #self.disk_params = self.params.disk
 
     def add_chemical_path(self, chemicalpath):
         self.chempath = chemicalpath
 
-    def add_star(self, mass=0.5, luminosity=1, temperature=4000., x=0., y=0., z=0.):
+    def add_star(self):
+        mass = self.thermalparams.star.mass
+        luminosity = self.thermalparams.star.luminosity
+        temperature = self.thermalparams.star.temperature
+        x = self.thermalparams.star.x
+        y = self.thermalparams.star.y
+        z = self.thermalparams.star.z
         self.grid.add_star(Star(mass=mass, luminosity=luminosity, \
                 temperature=temperature, x=x, y=y, z=z))
 
@@ -37,7 +41,7 @@ class Structure(Model):
 
     def add_disk(self,  dust=None, **kwargs):
         # Create a copy of the defaults
-        params = DiskParams()
+        params = self.params.disk
 
         # Apply overrides given by user
         for key, val in kwargs.items():
@@ -48,11 +52,12 @@ class Structure(Model):
         if (len(self.grid.dust) > 0):
             self.grid.add_dustdensity(self.disk.density_d(self.grid.r, self.grid.theta, self.grid.phi))
         else:
-            print('WARNING: no dust model as input. add your dust model in the grid (grid.add_dust(dust)) before creating the disk structure.')
+            print('WARNING: no dust model as input. add your dust model in add_diskt and in the grid (grid.add_dust(dust)) \
+                  before creating the disk structure.')
 
     def add_internalheating(self, **kwargs):
         # Create a copy of the defaults
-        params = DiskParams()       
+        params = self.params.disk     
         # Apply overrides given by user
         for key, val in kwargs.items():
             setattr(params, key, val)
@@ -61,7 +66,7 @@ class Structure(Model):
 
     def add_chemdisk(self, dust=None, **kwargs):
         # Create a copy of the defaults
-        params = DiskParams()
+        params = self.params.disk
 
         # Apply overrides given by user
         for key, val in kwargs.items():
@@ -92,8 +97,16 @@ class Structure(Model):
     #         )
 
 
-    def add_envelope(self, dust=None):
-        self.envelope = Envelope(self.envelope_params, dust=dust)
+    def add_envelope(self, dust=None, **kwargs):
+        # Create a copy of the defaults
+        params = self.params.envelope
+
+        # Apply overrides given by user
+        for key, val in kwargs.items():
+            setattr(params, key, val)
+
+        self.envelope = Envelope(params, dust=dust)
+
         if dust:
             self.grid.add_dustdensity(
                 self.envelope.density_d(self.grid.r, self.grid.theta, self.grid.phi)

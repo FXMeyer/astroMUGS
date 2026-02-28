@@ -14,7 +14,7 @@ from .. constants.constants import mu, amu
 
 class CustomDistrib:
 
-    def __init__(self, rho_m=2.5, units='microns', path='thermal/', filename="dust_sizes.inp"):
+    def __init__(self, rsingle=1.000e-01, rho_m=2.5, units='microns', path='thermal/', filename="dust_sizes.inp"):
         """
         The argument 'units' represents the size units given in the file. It can be microns, mm, cm, or m.
         The file to read must be, and only be, in the form of a simple column, from smallest to largest size.  
@@ -24,6 +24,7 @@ class CustomDistrib:
         self.units = units
         self.path = path
         self.rho_m = rho_m
+        self.rsingle = rsingle
 
     def sizes(self):
         """ A)

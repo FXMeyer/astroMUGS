@@ -194,7 +194,11 @@ class DiskParams:
     settfact: float = field(default=9.000e-01,
         metadata={'desc': "Settling factor."})
     settling: bool = field(default=True,
-        metadata={'desc': 'Is vertical settling. Default is True'})       
+        metadata={'desc': 'Is vertical settling. Default is True'})
+    sigma_compute: Literal['model', 'custom'] = field(default='model', 
+        metadata={'desc': 'Select custom if you want to read the surface densities from a personal file.'})
+    sigma_path: str = field(default=None, 
+        metadata={'desc': "path to file for custom surface densities if sigma_compute=custom"})          
     sigma_gas_ref: float = field(default=3.350e-01, 
         metadata={'desc': "[g.cm-2] Surface density of the gas at reference radius"})
     sigma_t: float = field(default=2.000e+00, 

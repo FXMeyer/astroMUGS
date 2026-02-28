@@ -15,6 +15,7 @@ from dataclasses import dataclass, fields, is_dataclass
 from typing import Optional, Literal, Any
 
 from astromugs.utils.struct import DiskParams
+from astromugs.utils import custom
 from astromugs.constants.constants import (
     mu,
     autocm,
@@ -241,29 +242,42 @@ class Disk:
         """ A)
         Return dust surface density (g.cm-2)
         """
-        sigmad = []
-        fraction = self.dust.massfraction()
-        #print(r.shape)
-        #sig = np.ones((fraction.shape, r[0].shape, r[1].shape, r[2].shape))
-        #print(sig)
-        if self.params.sigma_gas_ref != None:
-            sigma_di0 = fraction*self.params.dtogas*self.params.sigma_gas_ref
-            sigma_single0 = self.params.dtogas*self.params.sigma_gas_ref
-        else:
-            self.sigma_d0 = (2-self.params.p_exp)*self.params.dust_mass*M_sun/(2*np.pi*(self.params.ref_radius)**(self.params.p_exp)) / \
-                       (self.params.rout**(-self.params.p_exp+2) - self.params.rin**(-self.params.p_exp+2)) /autocm**2
-            sigma_di0 = fraction*self.sigma_d0
-            sigma_single0 = self.sigma_d0
- 
-        for s in sigma_di0:
-            sig = s*(r/self.params.ref_radius)**(-self.params.p_exp)
-            sig[(r >= self.params.rout) ^ (r <= self.params.rin)] = 0e0 # In case sigma is outside disk outer boundaries
-            sigmad.append(sig)
-        
-        sig_single = sigma_single0*(r/self.params.ref_radius)**(-self.params.p_exp)
-        sig_single[(r >= self.params.rout) ^ (r <= self.params.rin)] = 0e0 # In case sigma is outside disk outer boundaries
+        if self.params.sigma_compute == 'model':
+            sigmad = []
+            fraction = self.dust.massfraction()
+            #print(r.shape)
+            #sig = np.ones((fraction.shape, r[0].shape, r[1].shape, r[2].shape))
+            #print(sig)
+            if self.params.sigma_gas_ref != None:
+                sigma_di0 = fraction*self.params.dtogas*self.params.sigma_gas_ref
+                sigma_single0 = self.params.dtogas*self.params.sigma_gas_ref
+            else:
+                self.sigma_d0 = (2-self.params.p_exp)*self.params.dust_mass*M_sun/(2*np.pi*(self.params.ref_radius)**(self.params.p_exp)) / \
+                        (self.params.rout**(-self.params.p_exp+2) - self.params.rin**(-self.params.p_exp+2)) /autocm**2
+                sigma_di0 = fraction*self.sigma_d0
+                sigma_single0 = self.sigma_d0
+    
+            for s in sigma_di0:
+                sig = s*(r/self.params.ref_radius)**(-self.params.p_exp)
+                sig[(r >= self.params.rout) ^ (r <= self.params.rin)] = 0e0 # In case sigma is outside disk outer boundaries
+                sigmad.append(sig)
+            
+            sig_single = sigma_single0*(r/self.params.ref_radius)**(-self.params.p_exp)
+            sig_single[(r >= self.params.rout) ^ (r <= self.params.rin)] = 0e0 # In case sigma is outside disk outer boundaries
 
-        return np.array(sigmad), sig_single
+            return np.array(sigmad), sig_single
+        
+        elif self.params.sigma_compute == 'custom':
+            r_custom, sigmad_table, siggas_table = custom.surfacedensities(self.params.sigma_path)
+            # sigmad_table: (n_sizes, n_file_radii), r_custom: (n_file_radii,)
+            # Interpolate each size bin onto the grid radii r (can be 2D or 3D meshgrid)
+            r_flat = r.ravel()
+            sigmad = np.array([
+                np.interp(r_flat, r_custom, sigmad_table[i], left=0.0, right=0.0).reshape(r.shape)
+                for i in range(sigmad_table.shape[0])
+            ])
+            sig_single = np.interp(r_flat, r_custom, sigmad_table.sum(axis=0), left=0.0, right=0.0).reshape(r.shape)
+            return sigmad, sig_single
 
     def scaleheight_d(self, r):
         """ B)

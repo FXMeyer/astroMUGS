@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     from ..utils.thermal import ControlParams  # only needed for annotation
 
 
-def control(params: ControlParams):
-    with open("thermal/radmc3d.inp", "w") as f:
+def control(params: ControlParams, thermpath='thermal/'):
+    with open(thermpath + "radmc3d.inp", "w") as f:
         for fld in dataclass_fields(params):
             value = getattr(params, fld.name)
             if value is not None:
@@ -20,11 +20,11 @@ def control(params: ControlParams):
                 else:
                     f.write(f"{fld.name} = {value}\n")
 
-def stars(rstar, mstar, lam, xstar, ystar, zstar, tstar=None, fstar=None):
+def stars(rstar, mstar, lam, xstar, ystar, zstar, tstar=None, fstar=None, thermpath='thermal/'):
     nstars = len(rstar)
     nlam = len(lam)
 
-    f = open("thermal/stars.inp","w")
+    f = open(thermpath + "stars.inp","w")
 
     f.write(str(2)+"\n")
     f.write("{0:d}  {1:d}\n".format(nstars, nlam))
@@ -45,18 +45,18 @@ def stars(rstar, mstar, lam, xstar, ystar, zstar, tstar=None, fstar=None):
 
     f.close()
 
-def wavelength_micron(lam):
+def wavelength_micron(lam, thermpath='thermal/'):
     nlam = len(lam)
-    f = open("thermal/wavelength_micron.inp","w")
+    f = open(thermpath + "wavelength_micron.inp","w")
     f.write("{0:d}\n".format(nlam))
     for ilam in range(nlam):
         f.write("{0:f}\n".format(lam[ilam]))
     f.close()
 
-def mcmono_wavelength_micron(lam_mono):
+def mcmono_wavelength_micron(lam_mono, thermpath='thermal/'):
     nlam = len(lam_mono)
 
-    f = open("thermal/mcmono_wavelength_micron.inp","w")
+    f = open(thermpath + "mcmono_wavelength_micron.inp","w")
 
     f.write("{0:d}\n".format(nlam))
     for ilam in range(nlam):
@@ -64,7 +64,7 @@ def mcmono_wavelength_micron(lam_mono):
 
     f.close()
 
-def amr_grid(x, y, z, gridstyle="regular", coordsystem="cartesian"):
+def amr_grid(x, y, z, gridstyle="regular", coordsystem="cartesian", thermpath='thermal/'):
     nx = x.size-1
     ny = y.size-1
     nz = z.size-1
@@ -73,7 +73,7 @@ def amr_grid(x, y, z, gridstyle="regular", coordsystem="cartesian"):
     incl_y = int(ny > 1)
     incl_z = int(nz > 1)
 
-    f = open("thermal/amr_grid.inp","w")
+    f = open(thermpath + "amr_grid.inp","w")
 
     f.write(str(1)+"\n")
 
@@ -111,21 +111,23 @@ def amr_grid(x, y, z, gridstyle="regular", coordsystem="cartesian"):
 
     f.close()
 
-def dustopac(opacity):
+def dustopac(opacity, thermpath='thermal/'):
     '''
     Desc: write dustopac.inp
     Args: opacity
     '''
+    import os
     nspecies = len(opacity)
 
-    f = open("thermal/dustopac.inp","w")
+    f = open(thermpath + "dustopac.inp","w")
 
     f.write("2\n")
     f.write("{0:d}\n".format(nspecies))
     f.write("==============================================================\n")
     for i in range(nspecies):
-        filetype = opacity[i].split("/")[1].split("_")[0]
-        species = opacity[i].split("_")[1].split(".")[0]
+        basename = os.path.basename(opacity[i])  # e.g. "dustkappa_silicate.inp"
+        filetype = basename.split("_")[0]
+        species = basename.split("_")[1].split(".")[0]
 
         if (filetype == "dustkappa"):
             f.write("1\n")
@@ -141,7 +143,7 @@ def dustopac(opacity):
     f.close()
 
 
-def dust_density(density, gridstyle="regular"):
+def dust_density(density, gridstyle="regular", thermpath='thermal/'):
     '''
     Desc: write dust_density.inp
     Args: density
@@ -158,7 +160,7 @@ def dust_density(density, gridstyle="regular"):
         nx, ny, nz = density[0][0].shape
         ncells = nx*ny*nz
 
-    f = open("thermal/dust_density.inp","w")
+    f = open(thermpath + "dust_density.inp","w")
     f.write("1\n")
     f.write("{0:d}\n".format(ncells))
     f.write("{0:d}\n".format(nspecies))
@@ -173,14 +175,14 @@ def dust_density(density, gridstyle="regular"):
     f.close()
 
 
-def external_rad(isrf):
+def external_rad(isrf, thermpath='thermal/'):
     '''
     Desc: write external_source.inp
     Args: Interstellar radiation field
     '''
     nlam = len(isrf[0])
     factor = 1e0 #artificially multiply by a factor just to see the impact of different ISRF intensities. Will be removed in future updates
-    f = open("thermal/external_source.inp","w")
+    f = open(thermpath + "external_source.inp","w")
 
     f.write("2\n")
     f.write("{0:d}\n".format(nlam))
@@ -191,15 +193,15 @@ def external_rad(isrf):
 
     f.close()
 
-def accretion_heating(x, y, z, accretionheating, gridstyle="regular"):
+def accretion_heating(x, y, z, accretionheating, gridstyle="regular", thermpath='thermal/'):
     '''
-    Desc: Write viscous accretion heating in the file heatsource.inp 
+    Desc: Write viscous accretion heating in the file heatsource.inp
     Args: Viscous accretion heating structure
     '''
     nx = x.size-1
     ny = y.size-1
     nz = z.size-1
-    f = open("thermal/heatsource.inp","w")
+    f = open(thermpath + "heatsource.inp","w")
     f.write("1\n")
     f.write("{0:d}\n".format(nx*ny*nz))
 
@@ -212,10 +214,10 @@ def accretion_heating(x, y, z, accretionheating, gridstyle="regular"):
     f.close()
 
 
-def numberdens_mol(numberdens, species='CO', gridstyle="regular"):
+def numberdens_mol(numberdens, species='CO', gridstyle="regular", thermpath='thermal/'):
     '''
     Desc: write numberdens_XXX.inp, where XXX is a chemical species
-    Args: 
+    Args:
     '''
     if (gridstyle == "regular"):
         nx, ny = numberdens.shape
@@ -223,7 +225,7 @@ def numberdens_mol(numberdens, species='CO', gridstyle="regular"):
 
     print('writing numberdens_{}.inp...'.format(species))
 
-    f = open("thermal/numberdens_{}.inp".format(species),"w")
+    f = open(thermpath + "numberdens_{}.inp".format(species),"w")
     f.write("1\n")
     f.write("{0:d}\n".format(ncells))
     if (gridstyle == "regular"):
@@ -232,23 +234,23 @@ def numberdens_mol(numberdens, species='CO', gridstyle="regular"):
                     f.write("{0:e}\n".format(numberdens[ix,iy]))
     f.close()
 
-def lines(species='CO', format='leiden'):
+def lines(species='CO', format='leiden', thermpath='thermal/'):
     '''
     Desc: write lines.inp
     Args: species, format
     '''
-    f = open("thermal/lines.inp","w")
+    f = open(thermpath + "lines.inp","w")
     f.write("2\n")
     f.write("1\n")
     f.write("{} {} 0 0 0".format(species,format))
     f.close()
 
 
-def gas_velocity(star_mass, r, theta, phi, object="disk"):
+def gas_velocity(star_mass, r, theta, phi, object="disk", thermpath='thermal/'):
     '''
     Desc: write gas_velocity.inp
     Args: species, format
-    '''    
+    '''
 
     nr, ntheta, nphi = len(r), len(theta), len(phi)
     print(nr, ntheta, nphi)
@@ -264,7 +266,7 @@ def gas_velocity(star_mass, r, theta, phi, object="disk"):
     vz = vphi * np.cos(pp)
 
     # Write to file
-    with open('thermal/gas_velocity.inp', 'w') as f:
+    with open(thermpath + 'gas_velocity.inp', 'w') as f:
         f.write("1\n")  # iformat = 1 (ASCII)
         f.write(f"{nr*ntheta*nphi}\n")
 

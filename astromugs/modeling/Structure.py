@@ -25,6 +25,9 @@ class Structure(Model):
     def add_chemical_path(self, chemicalpath):
         self.chempath = chemicalpath
 
+    def add_thermal_path(self, thermalpath):
+        self.thermalpath = thermalpath
+
     def add_star(self):
         mass = self.thermalparams.star.mass
         luminosity = self.thermalparams.star.luminosity
@@ -46,6 +49,10 @@ class Structure(Model):
         # Apply overrides given by user
         for key, val in kwargs.items():
             setattr(params, key, val)
+
+        # Propagate thermalpath only if the user didn't set a custom path
+        if dust is not None and hasattr(dust, 'path') and dust.path == 'thermal/':
+            dust.path = self.thermalpath
 
         self.disk = Disk(params=params, dust=dust)
 
@@ -71,6 +78,9 @@ class Structure(Model):
         # Apply overrides given by user
         for key, val in kwargs.items():
             setattr(params, key, val)
+
+        if dust is not None and hasattr(dust, 'path'):
+            dust.path = self.thermalpath
 
         self.chemdisk = Disk(params=params, dust=dust)
 
@@ -104,6 +114,9 @@ class Structure(Model):
         # Apply overrides given by user
         for key, val in kwargs.items():
             setattr(params, key, val)
+
+        if dust is not None and hasattr(dust, 'path'):
+            dust.path = self.thermalpath
 
         self.envelope = Envelope(params, dust=dust)
 

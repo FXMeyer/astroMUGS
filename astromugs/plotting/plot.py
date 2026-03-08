@@ -104,79 +104,6 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2',
     plt.show()
 
 
-def density2D(mass1, mass2=None, overlap=False):
-    grid = pd.read_table('thermal/amr_grid.inp', engine='python', skiprows=5)
-    head = grid.columns
-    nr = int(grid.columns[0].split("  ")[0])
-    nt = int(grid.columns[0].split("  ")[1])
-    grid = grid[head[0]].values
-    dens = pd.read_table('thermal/dust_density.inp', engine='python', header=None, skiprows=3)
-    dens = dens[0].values
-    nbspecies = int(len(dens)/(nr*nt))
-    dens = np.reshape(dens, (nbspecies, nt, nr))
-    dist = grid[:nr+1]/autocm
-    theta = grid[nr+1:nr+1+nt+1]
-    theta[-1] = np.pi
-    dist, tt = np.meshgrid(dist, theta)
-    rr = dist*np.sin(tt)
-    zz = dist*np.cos(tt)
-
-    dens[dens<=1e-100] = 1e-100
-    if overlap == False:
-        # #--PLOT FIGURE--
-        if nbspecies == 1:
-            fig = plt.figure(figsize=(10, 8.))
-            ax = fig.add_subplot(111)
-            plt.xlabel(r'r [au]', fontsize = 17)
-            plt.ylabel(r'z [au]', fontsize = 17, labelpad=-7.4)
-            
-            numdens = dens[0]#/mass1[0]
-            t = plt.pcolor(rr, zz, numdens, cmap='gnuplot2', shading='auto', norm=LogNorm(vmin=1e-80, vmax=1e-1))
-            clr = plt.colorbar(t)
-            clr.set_label(r'$n_\mathrm{d}$ [cm${-3}$]', labelpad=-33, y=1.06, rotation=0, fontsize = 16)
-            #plt.xlim(1, 500)
-            #plt.ylim(-300, 300)
-            ax.tick_params(labelsize=17)
-            clr.ax.tick_params(labelsize=16) 
-            plt.show()
-
-        else:
-            for ispec in range(nbspecies):
-                fig = plt.figure(figsize=(8, 8.))
-                ax = fig.add_subplot(111)
-                plt.xlabel(r'r [au]', fontsize = 17)
-                plt.ylabel(r'z [au]', fontsize = 17, labelpad=-7.4)
-                numdens = dens[ispec]#/mass1[ispec]
-                t = plt.pcolor(rr, zz, numdens, cmap='gnuplot2', shading='auto', norm=LogNorm(vmin=1e-30, vmax=1e-17))
-                clr = plt.colorbar(t)
-                clr.set_label(r'$\rho_\mathrm{d}$ [g.cm${-3}$]', labelpad=-33, y=1.06, rotation=0, fontsize = 16)
-                plt.xlim(1, 1000)
-                plt.ylim(-1000, 1000)
-                ax.tick_params(labelsize=17)
-                clr.ax.tick_params(labelsize=16) 
-                props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-                ax.text(0.90, 0.95, 'bin: {}'.format(ispec+1), horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=16, bbox=props)
-                plt.show()
-
-    if overlap == True:
-        density = np.zeros((nt, nr))
-        fig = plt.figure(figsize=(10, 10.))
-        ax = fig.add_subplot(111)
-        plt.xlabel(r'r [au]', fontsize = 17)
-        plt.ylabel(r'z [au]', fontsize = 17, labelpad=-7.4)
-        numdens = dens#/mass1[ispec]
-        for ispec in range(0, nbspecies):
-            density += numdens[ispec]
-        t = plt.pcolor(rr, zz, density, cmap='gnuplot2', shading='auto', norm=LogNorm(vmin=1e-25, vmax=1e-17))
-        clr = plt.colorbar(t)
-        clr.set_label(r'$\rho_\mathrm{d}$ [g.cm${-3}$]', labelpad=-33, y=1.06, rotation=0, fontsize = 16)
-        #plt.xlim(1, 500)
-        #plt.ylim(-300, 300)
-        ax.tick_params(labelsize=17)
-        clr.ax.tick_params(labelsize=16) 
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax.text(0.90, 0.95, 'env+disk', horizontalalignment='center', verticalalignment='center', transform=ax.transAxes, fontsize=16, bbox=props)
-        plt.show()
 
 
 def temperature2D_grid(path='thermal/', vmin=1e0, vmax=1e3, cmap='gnuplot2',
@@ -262,16 +189,16 @@ def temperature2D_grid(path='thermal/', vmin=1e0, vmax=1e3, cmap='gnuplot2',
     plt.show()
 
 
-def midplane_temp(ath='thermal/', xlim=None, ylim=None):
-    grid = pd.read_table('thermal/amr_grid.inp', engine='python', skiprows=5)
+def midplane_temp(path='thermal/', xlim=None, ylim=None):
+    grid = pd.read_table(path+'amr_grid.inp', engine='python', skiprows=5)
     head = grid.columns
     nr = int(grid.columns[0].split("  ")[0])
     nt = int(grid.columns[0].split("  ")[1])
     grid = grid[head[0]].values
     try:
-        temp = pd.read_table('thermal/dust_temperature.dat', engine='python', header=None, skiprows=3)
+        temp = pd.read_table(path+'dust_temperature.dat', engine='python', header=None, skiprows=3)
     except IOError:
-        print('plot.midplane_temp: the file thermal/dust_temperature.dat is not present. Run a dust thermal simulation first.')
+        print('plot.midplane_temp: the file dust_temperature.dat is not present. Run a dust thermal simulation first.')
         sys.exit(1)
     temp = temp[0].values
     nbspecies = int(len(temp)/(nr*nt))
@@ -302,19 +229,19 @@ def midplane_temp(ath='thermal/', xlim=None, ylim=None):
     ax.tick_params(labelsize=18)
     plt.show()
 
-def vertical_temp(ath='thermal/', r=100):
-    grid = pd.read_table('thermal/amr_grid.inp', engine='python', skiprows=5)
+def vertical_temp(thermpath='thermal/', chempath='chemistry/', r=100):
+    grid = pd.read_table(thermpath+'amr_grid.inp', engine='python', skiprows=5)
     head = grid.columns
     nr = int(grid.columns[0].split("  ")[0])
     nt = int(grid.columns[0].split("  ")[1])
     grid = grid[head[0]].values
-    temp = pd.read_table('thermal/dust_temperature.dat', engine='python', header=None, skiprows=3)
+    temp = pd.read_table(thermpath+'dust_temperature.dat', engine='python', header=None, skiprows=3)
     temp = temp[0].values
     nbspecies = int(len(temp)/(nr*nt))
 
     if nbspecies == 1:
         try:
-            temp = pd.read_table('chemistry/'+str(r)+'AU/1D_static.dat', sep=r"\s+", engine='python', header=None, comment='!')
+            temp = pd.read_table(chempath+str(r)+'AU/1D_static.dat', sep=r"\s+", engine='python', header=None, comment='!')
         except IOError:
             print('plot.vertical_temp: radius {} does not exit in the model or path is not correct.'.format(r))
             sys.exit(1)
@@ -332,8 +259,8 @@ def vertical_temp(ath='thermal/', r=100):
         plt.show()
     elif nbspecies > 1:
         try:
-            static = pd.read_table('chemistry/'+str(r)+'AU/1D_static.dat', sep=r"\s+", engine='python', header=None, comment='!')
-            temp = pd.read_table('chemistry/'+str(r)+'AU/temperatures.dat', sep=r"\s+", engine='python', header=None)
+            static = pd.read_table(chempath+str(r)+'AU/1D_static.dat', sep=r"\s+", engine='python', header=None, comment='!')
+            temp = pd.read_table(chempath+str(r)+'AU/temperatures.dat', sep=r"\s+", engine='python', header=None)
         except IOError:
             print('plot.vertical_temp: radius = {} au does not exit in the model or path is not correct.'.format(r))
             sys.exit(1)
@@ -353,8 +280,8 @@ def vertical_temp(ath='thermal/', r=100):
         ax.tick_params(labelsize=18)
         plt.show()
 
-def avz(ath='thermal/', r=100):
-    static = pd.read_table('chemistry/'+str(r)+'AU/1D_static.dat', sep=r"\s+", engine='python', header=None, comment='!', skiprows=1)
+def avz(chempath='thermal/', r=100):
+    static = pd.read_table(chempath+str(r)+'AU/1D_static.dat', sep=r"\s+", engine='python', header=None, comment='!', skiprows=1)
     #--PLOT FIGURE--
     fig = plt.figure(figsize=(9.6, 8.2))
     ax = fig.add_subplot(111)
@@ -370,8 +297,8 @@ def avz(ath='thermal/', r=100):
     ax.tick_params(labelsize=18)
     plt.show()
 
-def opacity(ath='thermal/'):
-    opaclist = sorted(glob.glob('thermal/dustkap*'))
+def opacity(path='thermal/'):
+    opaclist = sorted(glob.glob(path+'dustkap*'))
 
     #---absorption
     fig = plt.figure(figsize=(9.6, 8.2)) #fig = plt.figure(figsize=(9.6, 7.2))
@@ -419,11 +346,11 @@ def opacity(ath='thermal/'):
     plt.show()
 
 
-def localflux(ath='thermal/'):
+def localflux(path='thermal/'):
     #---1/ Get grid shape and reshape the local flux array accordingly
-    flux = pd.read_table('thermal/mean_intensity.out', sep=r"\s+", comment='#', header=None, skiprows=4)
-    grid = pd.read_table('thermal/amr_grid.inp', engine='python', skiprows=5)
-    lam = pd.read_table('thermal/mcmono_wavelength_micron.inp', engine='python', header=None, skiprows=1)
+    flux = pd.read_table(path+'mean_intensity.out', sep=r"\s+", comment='#', header=None, skiprows=4)
+    grid = pd.read_table(path+'amr_grid.inp', engine='python', skiprows=5)
+    lam = pd.read_table(path+'mcmono_wavelength_micron.inp', engine='python', header=None, skiprows=1)
     lam = lam[0].values
     flux = flux[0].values
     

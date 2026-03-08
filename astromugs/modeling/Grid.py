@@ -208,7 +208,7 @@ class Grid:
             # plt.ylim(0, 5005)
             # #plt.show()
 
-    def set_wavelength_grid(self, lmin, lmax, nlam, log=False): #microns
+    def set_wavelength_grid(self, lmin, lmax, nlam, log=True): #microns
         if log:
             self.lam = np.logspace(np.log10(lmin), np.log10(lmax), \
                     nlam)
@@ -216,7 +216,7 @@ class Grid:
             self.lam = np.linspace(lmin, lmax, nlam)
 
 
-    def set_mcmonowavelength_grid(self, lmin, lmax, nlam, log=False):
+    def set_mcmonowavelength_grid(self, lmin, lmax, nlam, log=True):
         if log:
             self.monolam = np.logspace(np.log10(lmin), np.log10(lmax), \
                     nlam)

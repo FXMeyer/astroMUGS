@@ -79,7 +79,7 @@ class Structure(Model):
         for key, val in kwargs.items():
             setattr(params, key, val)
 
-        if dust is not None and hasattr(dust, 'path'):
+        if dust is not None and hasattr(dust, 'path') and dust.path == 'thermal/':
             dust.path = self.thermalpath
 
         self.chemdisk = Disk(params=params, dust=dust)
@@ -115,7 +115,7 @@ class Structure(Model):
         for key, val in kwargs.items():
             setattr(params, key, val)
 
-        if dust is not None and hasattr(dust, 'path'):
+        if dust is not None and hasattr(dust, 'path') and dust.path == 'thermal/':
             dust.path = self.thermalpath
 
         self.envelope = Envelope(params, dust=dust)

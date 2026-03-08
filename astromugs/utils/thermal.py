@@ -258,17 +258,41 @@ class StarParams:
     def _repr_html_(self):
         return "<br/>" + _html_repr(self)   # blank line in Jupyter
     
+@dataclass
+class WaveParams:
+    lmin: float = field(default=9.12e-2, 
+        metadata={'desc': r'[micron] Minimum wavelength for wavelength_micron.inp'})
+    lmax: float = field(default=1e4, 
+        metadata={'desc': r'[micron] Maximum wavelength for wavelength_micron.inp'})
+    na: int = field(default=200,
+            metadata={'desc': 'Number of wavelengths for wavelength_micron.inp'})
+    lmin_mono: float = field(default=9.12e-2, 
+        metadata={'desc': r'[micron] Minimum wavelength for mcmono_wavelength_micron.inp'})
+    lmax_mono: float = field(default=1e4, 
+        metadata={'desc': r'[micron] Maximum wavelength for mcmono_wavelength_micron.inp'})
+    na_mono: int = field(default=200,
+            metadata={'desc': 'Number of wavelengths for mcmono_wavelength_micron.inp'})
+
+
+    def __repr__(self):
+        # add a blank line before StarParams for readability
+        return "\n" + fancy_repr(self)
+
+    def _repr_html_(self):
+        return "<br/>" + _html_repr(self)   # blank line in Jupyter
+    
 
 # ---------------- thermal Params ----------------
 @dataclass
 class ThermalParams:
     control: ControlParams = field(default_factory=ControlParams)
     star: StarParams = field(default_factory=StarParams)
+    wave: WaveParams = field(default_factory=WaveParams)
 
     def __repr__(self):
         # blank line between dataclasses
-        return fancy_repr(self.control) + "\n\n" + fancy_repr(self.star)
+        return fancy_repr(self.control) + "\n\n" + fancy_repr(self.star) + "\n\n" + fancy_repr(self.wave)
 
     def _repr_html_(self):
         # Jupyter collapsible panels with spacing
-        return _html_repr(self.control) + "<br/><br/>" + _html_repr(self.star)
+        return _html_repr(self.control) + "<br/><br/>" + _html_repr(self.star) + "<br/><br/>" + _html_repr(self.wave)

@@ -8,12 +8,12 @@ else:
 
 def thermal(noscat=None, nphot_therm=None, nphot_scat=None, setthreads=1, \
         inclfreefree=None, nofreefree=None, inclgascont=None, nogascont=None, \
-        verbose=True, timelimit=7200, nice=None, thermpath='thermal/'):
+        verbose=True, timelimit=7200, nice=None, thermpath='thermal/', radmc3d_cmd='radmc3d'):
 
     if nice != None:
-        command="nice -{0:d} radmc3d mctherm".format(nice)
+        command="nice -{0:d} {1:s} mctherm".format(nice, radmc3d_cmd)
     else:
-        command="radmc3d mctherm"
+        command="{} mctherm".format(radmc3d_cmd)
 
     if (noscat == True):
         command += " noscat"
@@ -37,9 +37,9 @@ def thermal(noscat=None, nphot_therm=None, nphot_scat=None, setthreads=1, \
     else:
         output = run(command.split(" "), cwd=thermpath, stderr=STDOUT, timeout=timelimit)
 
-def localfield(nphot_mono=None, verbose=True, timelimit=7200, thermpath='thermal/'):
+def localfield(nphot_mono=None, verbose=True, timelimit=7200, thermpath='thermal/', radmc3d_cmd='radmc3d'):
 
-    command="radmc3d mcmono"
+    command="{} mcmono".format(radmc3d_cmd)
 
     if nphot_mono != None:
         command += " nphot_mono {0:d}".format(nphot_mono)
@@ -51,8 +51,8 @@ def localfield(nphot_mono=None, verbose=True, timelimit=7200, thermpath='thermal
     else:
         output = run(command.split(" "), cwd=thermpath, stderr=STDOUT, timeout=timelimit)
 
-def image(npix=None, lambda_micron=None, iline=None, incl=None, verbose=True, timelimit=7200, thermpath='thermal/'):
-    command="radmc3d image"
+def image(npix=None, lambda_micron=None, iline=None, incl=None, verbose=True, timelimit=7200, thermpath='thermal/', radmc3d_cmd='radmc3d'):
+    command="{} image".format(radmc3d_cmd)
     if npix != None and lambda_micron != None and incl != None:
         command += "npix {0:d} lambda {1:.6f} incl {2:.1f}".format(npix, lambda_micron, incl)
 

@@ -23,13 +23,12 @@ class Model:
         self.params = StructureParams()
         self.thermalparams = ThermalParams()
         self.thermalpath = 'thermal/'
+        self.radmc3d_cmd = 'radmc3d' #in case the user wants to point to a specific radmc3d
         self.grid = Grid(params=self.params.disk)
         self.nautilus = nautilus
         
 
-    def run_continuum(self, nphot=1e4, \
-                            write_control=False, \
-                            **keywords):
+    def run_continuum(self, write_control=False, **keywords):
         """ 
         Notes:
         run MC dust radiative transfer, open the resulting dust temperature as an array and computes the surface-area weigthed temperature. If run == False, user assumes the RADMC3D output files already exist.
@@ -42,7 +41,7 @@ class Model:
         if write_control == True:
             self.write_continuum(control=True)
 
-        self.run_thermal_radmc3d(nphot=nphot, **keywords)
+        self.run_thermal_radmc3d(**keywords)
 
 
 
@@ -59,7 +58,7 @@ class Model:
 
             # READ THERMAL FILES
             nx, ny, nz, x, y, z  = radmc3d.read.grid(thermpath)
-            self.grid.set_spherical_grid(x[0], x[-1], nx+1, ny+1, nz+1) #return self.grid.r, self.grid.theta. Necessary in case the user does not create themeselves the radmc3d files.
+            self.grid.set_spherical_grid() #return self.grid.r, self.grid.theta. Necessary in case the user does not create themeselves the radmc3d files.
             dust_density = radmc3d.read.dust_density(thermpath) # Gives a list of one numpy array. Will be updated when multiple structures
             nbspecies = int(len(dust_density[0])/(nx*ny*nz))
             dust_density = np.reshape(dust_density[0], (nbspecies, nz, ny, nx))
@@ -204,17 +203,17 @@ class Model:
         self.grid.localfield = np.reshape(self.grid.localfield, (nlam_mono, nz, ny, nx))
 
 
-    def run_thermal_radmc3d(self, nphot=1e6, verbose=True, timelimit=7200, \
+    def run_thermal_radmc3d(self, verbose=True, timelimit=7200, \
             nice=None, **keywords):
-        radmc3d.run.thermal(verbose=verbose, timelimit=timelimit, nice=nice, thermpath=self.thermalpath)
+        radmc3d.run.thermal(verbose=verbose, timelimit=timelimit, nice=nice, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
-    def run_localfield_radmc3d(self, nphot_mono=1e6, verbose=True, timelimit=7200):
-        radmc3d.run.localfield(nphot_mono=nphot_mono, verbose=verbose, timelimit=timelimit, thermpath=self.thermalpath)
+    def run_localfield_radmc3d(self, verbose=True, timelimit=7200):
+        radmc3d.run.localfield(verbose=verbose, timelimit=timelimit, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
     def run_image_radmc3d(self, npix=300, lambda_micron=None, iline=None, incl=None, verbose=True):
-        radmc3d.run.image(npix=npix, lambda_micron=lambda_micron, iline=iline, incl=incl, verbose=verbose, timelimit=7200, thermpath=self.thermalpath)
+        radmc3d.run.image(npix=npix, lambda_micron=lambda_micron, iline=iline, incl=incl, verbose=verbose, timelimit=7200, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
     def write_continuum(self, dens=False, grid=False, opac=False, control=False, stars=False, wave=False, mcmono=False, ext=False):

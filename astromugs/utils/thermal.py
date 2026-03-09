@@ -238,17 +238,17 @@ class ControlParams:
 @dataclass
 class StarParams:
     mass: float = field(default=1, 
-        metadata={'desc': r'[M4_{sun}$] Stellar mass'})
+        metadata={'desc': r'[Msun] Stellar mass. Note that this value can be independent from the value used for the physical model.'})
     temperature: float = field(default=4000, 
         metadata={'desc': r'[K] Stellar surface temperature'})
     luminosity: float = field(default=4000, 
         metadata={'desc': r'[Lsun] Stellar luminosity'})
     x: float = field(default=0, 
-        metadata={'desc': r'[au] Stellar position in x'})
+        metadata={'desc': r'[AU] Stellar position in x'})
     y: float = field(default=0, 
-        metadata={'desc': r'[au] Stellar position in y'})
+        metadata={'desc': r'[AU] Stellar position in y'})
     z: float = field(default=0, 
-        metadata={'desc': r'[au] Stellar position in z'})
+        metadata={'desc': r'[AU] Stellar position in z'})
 
 
     def __repr__(self):

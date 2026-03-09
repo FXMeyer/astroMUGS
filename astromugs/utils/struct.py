@@ -196,7 +196,7 @@ class DiskParams:
     settling: bool = field(default=True,
         metadata={'desc': 'Is vertical settling. Default is True'})
     sigma_compute: Literal['model', 'custom'] = field(default='model', 
-        metadata={'desc': 'Select custom if you want to read the surface densities from a personal file.'})
+        metadata={'desc': 'Select Model to create surface density profile or select custom if you want to read the surface densities from a personal file.'})
     sigma_path: str = field(default=None, 
         metadata={'desc': "path to file for custom surface densities if sigma_compute=custom"})          
     sigma_gas_ref: float = field(default=3.350e-01, 

@@ -16,7 +16,7 @@ from astromugs.constants.constants import autocm, M_sun, R_sun, L_sun
 #sys.path.insert(0,parentdir) 
 
 
-class Structure(Model):
+class Interface(Model):
     #def __init__(self):
         #self.params = StructureParams()
         #self.envelope_params = self.params.envelope

@@ -14,6 +14,7 @@ As suggested by its name (MUGS – MUlti-Grain Simulations), astroMUGS is specif
 
 AstroMUGS therefore provides a streamlined and user-friendly workflow for building complete chemistry post-processing pipelines for astrophysical simulations, allowing complex modeling setups to be generated and executed with only a few lines of code.
 
+Note that there is a Graphical User Interface version of astroMUGS that is uses a React flow and fastAPI structure. See astroMUGS-ui for more information. 
 
 Copyright
 =========

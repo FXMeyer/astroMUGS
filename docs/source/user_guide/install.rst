@@ -31,7 +31,7 @@ To make sure you always use the latest version, you can type::
 Requirements and environment
 =================
 
-It is usually recommended to use a dedicated virtual environment to avoid conflicts with other packages, although astromugs requirements are widely used latest released libraries. You can use ``conda`` to create a virtual environment. 
+It is strongly recommended to use a dedicated virtual environment to avoid conflicts with other packages. You can use ``conda`` to create a virtual environment. 
 The easiest way to do this is to use the provided ``environment.yml`` file. The name of the environment is ``astromugs`` by default, but you can change it in the ``environment.yml`` file before creating the environment.
 From the terminal, type::
 

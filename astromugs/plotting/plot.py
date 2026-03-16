@@ -52,7 +52,7 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', den
         rho_m = dust.rho_m #g.cm3
         sizes = dust.sizes()[0] # microns
         grain_mass = dust.grainmass() # in gram
-        
+
     else:
         sizes = None
 
@@ -110,6 +110,133 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', den
     cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
     fig.colorbar(im, cax=cbar_ax, label=r'$\rho_\mathrm{d}$ [g cm$^{-3}$]')
 
+    plt.show()
+
+
+def density2D_grid_interactive(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', dens_type='mass',
+                                xlim=None, ylim=None, dust=None, figsize=(10, 14)):
+    """Interactive version of density2D_grid with sliders for vmin/vmax.
+    Requires %matplotlib widget in the notebook."""
+    import ipywidgets as widgets
+    from IPython.display import display
+    import os
+
+    # --- Load data once ---
+    grid = pd.read_table(path + 'amr_grid.inp', engine='python', skiprows=5)
+    nr = int(grid.columns[0].split("  ")[0])
+    nt = int(grid.columns[0].split("  ")[1])
+    grid = grid[grid.columns[0]].values
+
+    dens = pd.read_table(path + 'dust_density.inp', engine='python', header=None, skiprows=3)
+    dens = dens[0].values
+    nspecies = int(len(dens) / (nr * nt))
+    dens = np.reshape(dens, (nspecies, nt, nr))
+
+    r_edge = grid[:nr+1] / autocm
+    theta_edge = grid[nr+1:nr+1+nt+1]
+    theta_edge[-1] = np.pi
+    rr_edge, tt_edge = np.meshgrid(r_edge, theta_edge)
+    R = rr_edge * np.sin(tt_edge)
+    Z = rr_edge * np.cos(tt_edge)
+
+    dens[dens <= 1e-100] = 1e-100
+
+    sizes_file = path + 'dust_sizes.inp'
+    if os.path.isfile(sizes_file):
+        sizes = np.loadtxt(sizes_file)
+        sizes = np.atleast_1d(sizes)
+    elif dust is not None:
+        sizes = dust.sizes()[0]
+        grain_mass = dust.grainmass()
+    else:
+        sizes = None
+
+    # Precompute plot data for each panel
+    plot_data = []
+    for idx in range(nspecies):
+        if dens_type == 'number' and dust is not None:
+            plot_data.append(4 * np.pi * sizes[idx] * 1e-4 * dens[idx] / grain_mass[idx])
+        else:
+            plot_data.append(dens[idx])
+    plot_data.append(dens.sum(axis=0))  # total
+
+    npanels = nspecies + 1
+    ncols = min(nspecies, 4)
+    nrows = int(np.ceil(npanels / ncols))
+
+    # --- Build figure ---
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharex=True, sharey=True)
+    axes = np.atleast_2d(axes)
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+
+    meshes = []
+    for idx in range(nrows * ncols):
+        ax = axes.flat[idx]
+        if idx < nspecies:
+            im = ax.pcolormesh(R, Z, plot_data[idx], cmap=cmap, shading='auto',
+                               norm=LogNorm(vmin=vmin, vmax=vmax))
+            meshes.append(im)
+            ax.set_title(f'bin {idx+1}', fontsize=12)
+            if sizes is not None and idx < len(sizes):
+                s = sizes[idx]
+                if s >= 1e3:
+                    size_label = f'{s/1e3:.1f} mm'
+                else:
+                    size_label = f'{s:.2f} ' + r'$\mu$m'
+                ax.text(0.05, 0.95, size_label, transform=ax.transAxes,
+                        fontsize=15, verticalalignment='top',
+                        horizontalalignment='left', bbox=props)
+        elif idx == nspecies:
+            im = ax.pcolormesh(R, Z, plot_data[nspecies], cmap=cmap, shading='auto',
+                               norm=LogNorm(vmin=vmin, vmax=vmax))
+            meshes.append(im)
+            ax.set_title('total', fontsize=12)
+        else:
+            ax.set_visible(False)
+            continue
+        if xlim:
+            ax.set_xlim(xlim)
+        if ylim:
+            ax.set_ylim(ylim)
+
+    for ax in axes[-1, :]:
+        if ax.get_visible():
+            ax.set_xlabel('r [au]', fontsize=14)
+    for ax in axes[:, 0]:
+        ax.set_ylabel('z [au]', fontsize=14)
+
+    fig.subplots_adjust(right=0.88, hspace=0.15, wspace=0.08)
+    cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
+    cbar = fig.colorbar(meshes[-1], cax=cbar_ax, label=r'$\rho_\mathrm{d}$ [g cm$^{-3}$]')
+
+    # --- Sliders ---
+    log_vmin = np.log10(vmin)
+    log_vmax = np.log10(vmax)
+
+    vmin_slider = widgets.FloatSlider(
+        value=log_vmin, min=-50, max=0, step=0.5,
+        description='log(vmin)', continuous_update=False,
+        style={'description_width': 'initial'}, layout=widgets.Layout(width='400px'))
+    vmax_slider = widgets.FloatSlider(
+        value=log_vmax, min=-50, max=0, step=0.5,
+        description='log(vmax)', continuous_update=False,
+        style={'description_width': 'initial'}, layout=widgets.Layout(width='400px'))
+
+    def update_clim(change):
+        new_vmin = 10**vmin_slider.value
+        new_vmax = 10**vmax_slider.value
+        if new_vmin >= new_vmax:
+            return
+        new_norm = LogNorm(vmin=new_vmin, vmax=new_vmax)
+        for m in meshes:
+            m.set_norm(new_norm)
+        cbar.update_normal(meshes[-1])
+        fig.canvas.draw_idle()
+
+    vmin_slider.observe(update_clim, names='value')
+    vmax_slider.observe(update_clim, names='value')
+
+    display(widgets.HBox([vmin_slider, vmax_slider]))
     plt.show()
 
 

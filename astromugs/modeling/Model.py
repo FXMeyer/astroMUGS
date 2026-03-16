@@ -24,7 +24,7 @@ class Model:
         self.thermalparams = ThermalParams()
         self.thermalpath = 'thermal/'
         self.radmc3d_cmd = 'radmc3d' #in case the user wants to point to a specific radmc3d
-        self.grid = Grid(params=self.params.disk)
+        self.grid = Grid(params=self.params.disk, wave=self.thermalparams.wave)
         self.nautilus = nautilus
         
 

@@ -20,8 +20,8 @@ from matplotlib.colors import LogNorm
 from astromugs.constants.constants import autocm
 
 
-def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2',
-                    xlim=None, ylim=None, figsize=(10, 14)):
+def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', dens_type='mass',
+                    xlim=None, ylim=None, dust=None, figsize=(10, 14)):
     """Plot all dust species on a single figure with subplots, plus total density."""
     grid = pd.read_table(path + 'amr_grid.inp', engine='python', skiprows=5)
     nr = int(grid.columns[0].split("  ")[0])
@@ -48,6 +48,11 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2',
     if os.path.isfile(sizes_file):
         sizes = np.loadtxt(sizes_file)
         sizes = np.atleast_1d(sizes)
+    elif dust != None:
+        rho_m = dust.rho_m #g.cm3
+        sizes = dust.sizes()[0] # microns
+        grain_mass = dust.grainmass() # in gram
+        
     else:
         sizes = None
 
@@ -64,8 +69,12 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2',
     for idx in range(nrows * ncols):
         ax = axes.flat[idx]
         if idx < nspecies:
-            im = ax.pcolormesh(R, Z, dens[idx], cmap=cmap, shading='auto',
-                               norm=LogNorm(vmin=vmin, vmax=vmax))
+            if dens_type == 'number':
+                im = ax.pcolormesh(R, Z, 4*np.pi*sizes[idx]*1e-4*dens[idx]/grain_mass[idx], cmap=cmap, shading='auto',
+                                   norm=LogNorm(vmin=vmin, vmax=vmax))
+            elif dens_type == 'mass':
+                im = ax.pcolormesh(R, Z, dens[idx], cmap=cmap, shading='auto',
+                                   norm=LogNorm(vmin=vmin, vmax=vmax))
             ax.set_title(f'bin {idx+1}', fontsize=12)
             if sizes is not None and idx < len(sizes):
                 s = sizes[idx]
@@ -126,6 +135,10 @@ def temperature2D_grid(path='thermal/', vmin=1e0, vmax=1e3, cmap='gnuplot2',
     R = rr_edge * np.sin(tt_edge)
     Z = rr_edge * np.cos(tt_edge)
 
+    # Convert edge grid to cell-center grid for contour plotting
+    R_center = 0.25 * (R[:-1, :-1] + R[1:, :-1] + R[:-1, 1:] + R[1:, 1:])
+    Z_center = 0.25 * (Z[:-1, :-1] + Z[1:, :-1] + Z[:-1, 1:] + Z[1:, 1:])
+
 
         # Try to read grain sizes for subplot labels
     import os
@@ -146,11 +159,23 @@ def temperature2D_grid(path='thermal/', vmin=1e0, vmax=1e3, cmap='gnuplot2',
 
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
 
+    levels = np.arange(vmin, vmax + 10, 10)
+
     for idx in range(nrows * ncols):
         ax = axes.flat[idx]
         if idx < nspecies:
             im = ax.pcolormesh(R, Z, temp[idx], cmap=cmap, shading='auto',
-                               norm=LogNorm(vmin=vmin, vmax=vmax))
+                              norm=LogNorm(vmin=vmin, vmax=vmax))
+            #im = ax.contourf(R_center, Z_center, temp[idx], levels=levels, cmap=cmap)
+            cs = ax.contour(
+                R_center,
+                Z_center,
+                temp[idx],
+                levels=[20],
+                colors='black',
+                linewidths=2
+            )
+            #ax.clabel(cs, fmt="20 K", fontsize=10)
             ax.set_title(f'bin {idx+1}', fontsize=12)
             if sizes is not None and idx < len(sizes):
                 s = sizes[idx]

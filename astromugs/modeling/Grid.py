@@ -17,15 +17,17 @@ import numpy as np
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from astromugs.utils.struct import DiskParams #only need this for annotations
-    from astromugs.utils.thermal import ThermalParams #only need this for annotations
+    from astromugs.utils.thermal import WaveParams #only need this for annotations
 
     
 
 class Grid:
     def __init__(self,
-                 params: DiskParams
+                 params: DiskParams,
+                 wave: WaveParams
     ):
         self.params = params
+        self.wave = wave
         self.density = []
         self.dustdensity = []
         self.gasdensity_chem = []
@@ -208,7 +210,10 @@ class Grid:
             # plt.ylim(0, 5005)
             # #plt.show()
 
-    def set_wavelength_grid(self, lmin, lmax, nlam, log=True): #microns
+    def set_wavelength_grid(self, log=True): #microns
+        lmin = self.wave.lmin
+        lmax = self.wave.lmax
+        nlam = self.wave.nlam
         if log:
             self.lam = np.logspace(np.log10(lmin), np.log10(lmax), \
                     nlam)
@@ -216,9 +221,12 @@ class Grid:
             self.lam = np.linspace(lmin, lmax, nlam)
 
 
-    def set_mcmonowavelength_grid(self, lmin, lmax, nlam, log=True):
+    def set_mcmonowavelength_grid(self, log=True):
+        lmin_mono = self.wave.lmin_mono
+        lmax_mono = self.wave.lmax_mono
+        nlam_mono = self.wave.nlam_mono
         if log:
-            self.monolam = np.logspace(np.log10(lmin), np.log10(lmax), \
-                    nlam)
+            self.monolam = np.logspace(np.log10(lmin_mono), np.log10(lmax_mono), \
+                    nlam_mono)
         else:
-            self.monolam = np.linspace(lmin, lmax, nlam)
+            self.monolam = np.linspace(lmin_mono, lmax_mono, nlam_mono)

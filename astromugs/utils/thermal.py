@@ -264,13 +264,13 @@ class WaveParams:
         metadata={'desc': r'[micron] Minimum wavelength for wavelength_micron.inp'})
     lmax: float = field(default=1e4, 
         metadata={'desc': r'[micron] Maximum wavelength for wavelength_micron.inp'})
-    na: int = field(default=200,
+    nlam: int = field(default=200,
             metadata={'desc': 'Number of wavelengths for wavelength_micron.inp'})
     lmin_mono: float = field(default=9.12e-2, 
         metadata={'desc': r'[micron] Minimum wavelength for mcmono_wavelength_micron.inp'})
     lmax_mono: float = field(default=1e4, 
         metadata={'desc': r'[micron] Maximum wavelength for mcmono_wavelength_micron.inp'})
-    na_mono: int = field(default=200,
+    nlam_mono: int = field(default=200,
             metadata={'desc': 'Number of wavelengths for mcmono_wavelength_micron.inp'})
 
 

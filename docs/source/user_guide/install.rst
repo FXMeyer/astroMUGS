@@ -47,6 +47,8 @@ You can now activate the new environment with::
 
     conda activate astromugs
 
+Note that the next version of astroMUGS will use ``uv`` for installation. Keep up-to-date by checking the documentation. 
+
 
 Running the code
 =================

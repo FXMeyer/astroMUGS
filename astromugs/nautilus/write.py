@@ -359,7 +359,17 @@ def uv_factordisk(UV_ref, ref_radius, radius, Hg):
     return uvfact
 
 def uv_factor(isrf, lam_mono, R_star, T_star, rchem, zchem, external):
+    """
+    Define the uv_factor from the stellar spectrum (Assuming BB for now). 
 
+    Args:
+        isrf: 
+        lam_mono: the wavelengths in the mcmono_wavelength file
+        external: possible external heating source (heating from accretion, etc.) 
+
+
+    comments:
+    """
     #get only the UV range from the mcmono_wavelength file.
     lamuv = np.where((lam_mono <= 0.2)) # extract the ~ uv
 
@@ -383,7 +393,7 @@ def uv_factor(isrf, lam_mono, R_star, T_star, rchem, zchem, external):
     elif len(external) == 0:  #no external source used.
             uvref = bbint/isrfint
 
-    uvfact = uvref*(R_star**2/(np.pi*(rchem**2 + zchem**2)))
+    uvfact = uvref*(R_star**2/(np.pi*(rchem**2 + zchem**2))) # dilutes by distance from source. 
 
     return uvfact
 
@@ -394,14 +404,14 @@ def avnh_factor(nH_to_AV_conversion, dtogas, rgrain, nbz): # rgrain provided in 
 def static(path, dist, gas_density, T_gas, av_z, T_dust, dust_density, r_grain, avnh_fact, uvfactor):
     distance = dist
     nh = gas_density#*2
-    Tgas = T_gas*1.02
-    avz = av_z/1.05#*2.8
-    avz = np.where(avz>45, avz*1.05, avz)
+    Tgas = T_gas#*1.02
+    avz = av_z#/1.05#*2.8
+    #avz = np.where(avz>45, avz*1.05, avz)
 
     #avz = np.where((avz >= 50) & (avz <= 72*1.4), avz*1.2, avz)
     #avz = np.where((avz >= 40) & (avz <= 50*1.2), avz*1.1, avz)
     diff_coef = np.zeros(len(distance))
-    Tdust = T_dust*1.02 #if 1 size. If several sizes, Tdust will be the surface weigthed temperature
+    Tdust = T_dust #if 1 size. If several sizes, Tdust will be the surface weigthed temperature
     avnhfact = avnh_fact
     rgrain = r_grain*1e-4*np.ones(len(dist))
     inv_ab = gas_density/dust_density
@@ -412,12 +422,12 @@ def static(path, dist, gas_density, T_gas, av_z, T_dust, dust_density, r_grain, 
     np.savetxt(path+'1D_static.dat', static_array, fmt='%.5E', delimiter='   ', newline='\n', header=header_static , comments='! ', encoding=None)
 
 def network(path):
-    copy("chemdiskpy/nautilus/network/gas_species.in", path + "gas_species.in")
-    copy("chemdiskpy/nautilus/network/grain_species.in", path + "grain_species.in")
-    copy("chemdiskpy/nautilus/network/gas_reactions.in", path + "gas_reactions.in")
-    copy("chemdiskpy/nautilus/network/grain_reactions.in", path + "grain_reactions.in")
-    copy("chemdiskpy/nautilus/network/activation_energies.in", path + "activation_energies.in")
-    copy("chemdiskpy/nautilus/network/surface_parameters.in", path + "surface_parameters.in")
+    copy("astromugs/nautilus/network/gas_species.in", path + "gas_species.in")
+    copy("astromugs/nautilus/network/grain_species.in", path + "grain_species.in")
+    copy("astromugs/nautilus/network/gas_reactions.in", path + "gas_reactions.in")
+    copy("astromugs/nautilus/network/grain_reactions.in", path + "grain_reactions.in")
+    copy("astromugs/nautilus/network/activation_energies.in", path + "activation_energies.in")
+    copy("astromugs/nautilus/network/surface_parameters.in", path + "surface_parameters.in")
 
 def elements(path):
     f = open(path + 'element.in',"w")

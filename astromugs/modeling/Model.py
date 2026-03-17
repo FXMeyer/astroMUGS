@@ -23,6 +23,7 @@ class Model:
         self.params = StructureParams()
         self.thermalparams = ThermalParams()
         self.thermalpath = 'thermal/'
+        self.chempath = 'chemistry/'
         self.radmc3d_cmd = 'radmc3d' #in case the user wants to point to a specific radmc3d
         self.grid = Grid(params=self.params.disk, wave=self.thermalparams.wave)
         self.nautilus = nautilus
@@ -58,7 +59,7 @@ class Model:
 
             # READ THERMAL FILES
             nx, ny, nz, x, y, z  = radmc3d.read.grid(thermpath)
-            self.grid.set_spherical_grid() #return self.grid.r, self.grid.theta. Necessary in case the user does not create themeselves the radmc3d files.
+            self.grid.set_spherical_grid(r_edge=np.array(x)/autocm, theta_edge=y, phi_edge=z)
             dust_density = radmc3d.read.dust_density(thermpath) # Gives a list of one numpy array. Will be updated when multiple structures
             nbspecies = int(len(dust_density[0])/(nx*ny*nz))
             dust_density = np.reshape(dust_density[0], (nbspecies, nz, ny, nx))
@@ -154,17 +155,15 @@ class Model:
 
         if os.path.isfile(thermpath + 'amr_grid.inp'):
             nx, ny, nz, x, y, z  = radmc3d.read.grid(thermpath) # read grid. the amr_grid.inp shows the border of the cells so we convert them.
-            self.grid.set_spherical_grid(x[0]/autocm, x[-1]/autocm, nx+1, ny+1, nz+1, log=True)
+            self.grid.set_spherical_grid(r_edge=np.array(x)/autocm, theta_edge=y, phi_edge=z)
             x, y, z = self.grid.r, self.grid.theta, self.grid.phi
-            y[0] = 0
-            y[-1] = np.pi  # to avoid numerical issues.
         elif hasattr(self.grid, 'r_edge') and self.grid.r_edge is not None:
             nx, ny, nz, x, y, z = self.grid.nr, self.grid.ntheta, self.grid.nphi, self.grid.r, self.grid.theta, self.grid.phi
             nx = nx-1
             ny = ny-1
             nz = nz-1
         else:
-            print(f"Error: amr_grid not found. Make sure there is one (example: create one using grid.set_spherical_grid(rin, rout, nr, ntheta, nphi, log=True))")
+            print(f"Error: amr_grid not found. Make sure there is one (example: create one using grid.set_spherical_grid())")
             sys.exit(1)  # Exit the program with a non-zero status to indicate an error
 
         if numberdens==True:
@@ -181,17 +180,9 @@ class Model:
 
 
             
-    def localfield(self, nphot_mono=1e6, write_mcmono=False, run=True, **keywords):
+    def run_localfield(self, nphot_mono=None, write_mcmono=False, run=True, **keywords):
 
-        self.write_continuum(write=True,\
-                           write_dens=False, \
-                           write_grid=False, \
-                           write_opac=False, \
-                           write_control=False, \
-                           write_star=False, \
-                           write_wave=False, \
-                           write_mcmono=write_mcmono, \
-                           write_ext=False, **keywords)
+        self.write_continuum(mcmono=write_mcmono, **keywords)
         
         if run == True:
             self.run_localfield_radmc3d(nphot_mono=nphot_mono)
@@ -208,8 +199,8 @@ class Model:
         radmc3d.run.thermal(verbose=verbose, timelimit=timelimit, nice=nice, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
-    def run_localfield_radmc3d(self, verbose=True, timelimit=7200):
-        radmc3d.run.localfield(verbose=verbose, timelimit=timelimit, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
+    def run_localfield_radmc3d(self, nphot_mono=None, verbose=True, timelimit=7200):
+        radmc3d.run.localfield(nphot_mono=nphot_mono, verbose=verbose, timelimit=timelimit, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
     def run_image_radmc3d(self, npix=300, lambda_micron=None, iline=None, incl=None, verbose=True):
@@ -336,8 +327,9 @@ class Model:
         # READ THERMAL FILES (just like in function thermal, but sometimes the user does not need to run thermal so this reads the thermal files even though they might already be read by thermal)
         #-----------------------------------------
         nx, ny, nz, x, y, z  = radmc3d.read.grid(thermpath) # read grid
-        print(type(x), type(y))
-        self.grid.set_spherical_grid(x, y, z) #return self.grid.r, self.grid.theta. Necessary in case the user does not create themeselves the radmc3d files.
+
+        # x is r_edges in cm, y is theta_edges, z is phi_edges
+        self.grid.set_spherical_grid(r_edge=np.array(x)/autocm, theta_edge=y, phi_edge=z)
 
         dust_density = radmc3d.read.dust_density(thermpath) # read dust_density file
         nbspecies = int(len(dust_density[0])/(nx*ny*nz)) #get number of species
@@ -401,10 +393,10 @@ class Model:
             try:
                 self.grid.localfield = np.reshape(self.grid.localfield, (nlam_mono, nz, ny, nx)) 
             except IOError:
-                print('\nPlease, check consistency between the grid size and external_source size.\n')
+                print('\nPlease, check consistency between the grid size and mean_intensity.out.\n')
                 sys.exit(1)
         else:
-            print('Warning: No external_source file was found. If coupling_av is True then the chemistry model cannot be created. Please check external_source file or set coupling_av=False.')
+            print('Warning: No mean_intensity.out file was found. If coupling_av is True then the chemistry model cannot be created. Please check mean_intensity.out file or set coupling_av=False.')
 
 
         #-----------------------------------------
@@ -447,7 +439,7 @@ class Model:
 
         
         for idx, r in enumerate(self.grid.rchem):
-            path = 'chemistry' + '/' + str(int(r)) + 'AU/'
+            path = chempath + '/' + str(int(r)) + 'AU/'
             os.makedirs(path, exist_ok=False) 
 
             #---temporary defining cavity to increase the Av in that area so we don't have convergence issue. This should be removed in the main branch.
@@ -511,7 +503,7 @@ class Model:
                         md = (4/3)*np.pi*rho_m*(rsingle*1e-4)**3
                         nd = dtogas*n_gas[idx, :]*amu*mu/md
                     ##!!!!!!! TO BE REMOVED !!!!!!!
-                    av_z[idx, :] = np.where(dist>zcav, av_z[idx, :]*10, av_z[idx, :])
+                    #av_z[idx, :] = np.where(dist>zcav, av_z[idx, :]*10, av_z[idx, :])
                     ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                     nautilus.write.static(path, \
                                     dist, \

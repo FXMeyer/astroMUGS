@@ -271,12 +271,14 @@ class Disk:
             r_custom, sigmad_table, siggas_table = custom.surfacedensities(self.params.sigma_path)
             # sigmad_table: (n_sizes, n_file_radii), r_custom: (n_file_radii,)
             # Interpolate each size bin onto the grid radii r (can be 2D or 3D meshgrid)
-            r_flat = r.ravel()
+            # Clamp radii to the table range to avoid midplane band artifacts
+            # in spherical grids (the outer cutoff is handled by border in density_d)
+            r_flat = np.clip(r.ravel(), r_custom[0], r_custom[-1])
             sigmad = np.array([
-                np.interp(r_flat, r_custom, sigmad_table[i], left=0.0, right=0.0).reshape(r.shape)
+                np.interp(r_flat, r_custom, sigmad_table[i]).reshape(r.shape)
                 for i in range(sigmad_table.shape[0])
             ])
-            sig_single = np.interp(r_flat, r_custom, sigmad_table.sum(axis=0), left=0.0, right=0.0).reshape(r.shape)
+            sig_single = np.interp(r_flat, r_custom, sigmad_table.sum(axis=0)).reshape(r.shape)
             return sigmad, sig_single
 
     def scaleheight_d(self, r):

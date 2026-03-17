@@ -659,3 +659,229 @@ def image_vertical_cut(pathfile='thermal/', xlim=None,ylim=None, labels=None, fi
         ax.set_ylim(ylim)
 
     plt.show()
+
+def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='gnuplot2',
+           xlim=None, ylim=None, figsize=(6, 6), save=False, savename='filename.pdf'):
+    """Plot a 2D map of a column from the 1D_static.dat files.
+
+    Scans all XXAU/ folders in chempath, reads each 1D_static.dat,
+    and builds a 2D (r, z) map of the chosen column.
+
+    Parameters
+    ----------
+    chempath : str
+        Path to the chemistry directory containing the XXAU/ folders.
+    column : str
+        Column to plot. One of: 'z', 'nH', 'Tg', 'Av', 'diff', 'Td',
+        'inv_ab', 'conv_factor', 'a', 'uv'.
+    vmin, vmax : float
+        Color scale limits.
+    iso : float or list, optional
+        Draw contour lines of Td at these levels (e.g. 20 or [20, 50]).
+    cmap : str
+        Colormap name.
+    xlim, ylim : tuple, optional
+        Axis limits (r, z) in AU.
+    figsize : tuple
+        Figure size.
+    save : bool
+        Save the figure to savename.
+    savename : str
+        Output filename if save is True.
+    """
+    import os, re
+
+    columns = ['z', 'nH', 'Tg', 'Av', 'diff', 'Td', 'inv_ab', 'conv_factor', 'a', 'uv']
+
+    # Discover XXAU/ folders and extract radii
+    folders = [d for d in os.listdir(chempath)
+               if os.path.isdir(os.path.join(chempath, d)) and re.match(r'^\d+AU$', d)]
+    rchem = sorted([int(d.replace('AU', '')) for d in folders])
+
+    # Read the first file to get nbz
+    first_file = os.path.join(chempath, f'{rchem[0]}AU', '1D_static.dat')
+    first = pd.read_table(first_file, sep=r"\s+", comment='!', header=None, engine='python')
+    nbz = len(first)
+
+    # Build 2D arrays
+    static_map = np.zeros((nbz, len(rchem)))
+    temp_map = np.zeros((nbz, len(rchem)))
+    zz = np.zeros((nbz, len(rchem)))
+
+    for idx, r in enumerate(rchem):
+        filepath = os.path.join(chempath, f'{r}AU', '1D_static.dat')
+        data = pd.read_table(filepath, sep=r"\s+", comment='!', header=None, engine='python')
+        data.columns = columns
+        static_map[:, idx] = data[column].values
+        temp_map[:, idx] = data['Td'].values
+        zz[:, idx] = data['z'].values
+
+    rr, _ = np.meshgrid(rchem, np.arange(nbz))
+
+    # Plot
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_aspect('equal', adjustable='box')
+    t = ax.pcolormesh(rr, zz, static_map, cmap=cmap, shading='gouraud',
+                      norm=LogNorm(vmin=vmin, vmax=vmax), rasterized=True)
+    clr = fig.colorbar(t, pad=0.01)
+    clr.set_label(column, fontsize=16)
+    clr.ax.tick_params(labelsize=14)
+
+    if iso is not None:
+        if not isinstance(iso, (list, tuple)):
+            iso = [iso]
+        ax.contour(rr, zz, temp_map, iso, colors='black', linewidths=2.5)
+
+    ax.set_xlabel(r'r [au]', fontsize=20)
+    ax.set_ylabel(r'z [au]', fontsize=20)
+    ax.tick_params(labelsize=15)
+    if xlim:
+        ax.set_xlim(xlim)
+    if ylim:
+        ax.set_ylim(ylim)
+
+    if save:
+        fig.savefig(savename, bbox_inches='tight')
+
+    plt.show()
+
+
+def grain_sizes(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, cmap='gnuplot2',
+                xlim=None, ylim=None, figsize=(14, 10), save=False, savename='grain_sizes.pdf'):
+    """Plot 2D (r, z) maps per grain size from the 1D_grain_sizes.in files.
+
+    Each subplot corresponds to one grain size bin.
+
+    Parameters
+    ----------
+    chempath : str
+        Path to the chemistry directory containing the XXAU/ folders.
+    quantity : str
+        What to plot: 'Td' for dust temperature, 'nd' for dust number density (nH / inv_ab).
+    vmin, vmax : float, optional
+        Color scale limits. Auto-determined if None.
+    cmap : str
+        Colormap name.
+    xlim, ylim : tuple, optional
+        Axis limits (r, z) in AU.
+    figsize : tuple
+        Figure size.
+    save : bool
+        Save the figure to savename.
+    savename : str
+        Output filename if save is True.
+    """
+    import os, re
+
+    static_columns = ['z', 'nH', 'Tg', 'Av', 'diff', 'Td', 'inv_ab', 'conv_factor', 'a', 'uv']
+
+    # Discover XXAU/ folders and extract radii
+    folders = [d for d in os.listdir(chempath)
+               if os.path.isdir(os.path.join(chempath, d)) and re.match(r'^\d+AU$', d)]
+    rchem = sorted([int(d.replace('AU', '')) for d in folders])
+
+    # Read the first grain_sizes file to determine N (number of grain sizes)
+    # and grain radii from the first data line
+    first_gs = os.path.join(chempath, f'{rchem[0]}AU', '1D_grain_sizes.in')
+    with open(first_gs, 'r') as f:
+        for line in f:
+            stripped = line.split('!')[0].strip()
+            if not stripped:
+                continue
+            vals = stripped.split()
+            ncols = len(vals)
+            grain_radii_cm = np.array([float(v) for v in vals[:ncols // 4]])
+            break
+    # ncols = 4*N (sizes, inv_ab, Td, CR-peak)
+    ngrains = ncols // 4
+    grain_radii_um = grain_radii_cm * 1e4  # cm to microns
+
+    # Read first static file for nbz
+    first_static = os.path.join(chempath, f'{rchem[0]}AU', '1D_static.dat')
+    first = pd.read_table(first_static, sep=r"\s+", comment='!', header=None, engine='python')
+    nbz = len(first)
+    # Build 3D arrays: (ngrains, nbz, nradii)
+    data_map = np.zeros((ngrains, nbz, len(rchem)))
+    zz = np.zeros((nbz, len(rchem)))
+
+    for idx, r in enumerate(rchem):
+        # Read static for nH and z
+        static_file = os.path.join(chempath, f'{r}AU', '1D_static.dat')
+        static_data = pd.read_table(static_file, sep=r"\s+", comment='!', header=None, engine='python')
+        static_data.columns = static_columns
+        nH = static_data['nH'].values
+        zz[:, idx] = static_data['z'].values
+
+        # Read grain_sizes
+        gs_file = os.path.join(chempath, f'{r}AU', '1D_grain_sizes.in')
+        gs_lines = []
+        with open(gs_file, 'r') as f:
+            for line in f:
+                stripped = line.split('!')[0].strip()
+                if not stripped:
+                    continue
+                gs_lines.append([float(v) for v in stripped.split()])
+        gs_array = np.array(gs_lines)  # (nbz, 4*ngrains)
+
+        inv_ab = gs_array[:, ngrains:2*ngrains]       # (nbz, ngrains)
+        Td     = gs_array[:, 2*ngrains:3*ngrains]     # (nbz, ngrains)
+
+        if quantity == 'Td':
+            for ig in range(ngrains):
+                data_map[ig, :, idx] = Td[:, ig]
+        elif quantity == 'nd':
+            for ig in range(ngrains):
+                data_map[ig, :, idx] = nH / inv_ab[:, ig]
+
+    rr, _ = np.meshgrid(rchem, np.arange(nbz))
+
+    # Layout
+    ncols_plot = min(ngrains, 4)
+    nrows_plot = int(np.ceil(ngrains / ncols_plot))
+
+    fig, axes = plt.subplots(nrows_plot, ncols_plot, figsize=figsize, sharex=True, sharey=True)
+    axes = np.atleast_2d(axes)
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+
+    for ig in range(nrows_plot * ncols_plot):
+        ax = axes.flat[ig]
+        if ig < ngrains:
+            ax.set_aspect('equal', adjustable='box')
+            im = ax.pcolormesh(rr, zz, data_map[ig], cmap=cmap, shading='gouraud',
+                               norm=LogNorm(vmin=vmin, vmax=vmax), rasterized=True)
+            # Size label
+            s = grain_radii_um[ig]
+            if s >= 1e3:
+                size_label = f'{s/1e3:.1f} mm'
+            else:
+                size_label = f'{s:.2f} ' + r'$\mu$m'
+            ax.text(0.05, 0.95, size_label, transform=ax.transAxes,
+                    fontsize=13, verticalalignment='top',
+                    horizontalalignment='left', bbox=props)
+            if xlim:
+                ax.set_xlim(xlim)
+            if ylim:
+                ax.set_ylim(ylim)
+        else:
+            ax.set_visible(False)
+
+    for ax in axes[-1, :]:
+        if ax.get_visible():
+            ax.set_xlabel('r [au]', fontsize=14)
+    for ax in axes[:, 0]:
+        ax.set_ylabel('z [au]', fontsize=14)
+
+    fig.subplots_adjust(right=0.88, hspace=0.15, wspace=0.08)
+    cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
+    if quantity == 'Td':
+        label = r'T$_\mathrm{d}$ [K]'
+    elif quantity == 'nd':
+        label = r'n$_\mathrm{d}$ [cm$^{-3}$]'
+    else:
+        label = quantity
+    fig.colorbar(im, cax=cbar_ax, label=label)
+
+    if save:
+        fig.savefig(savename, bbox_inches='tight')
+
+    plt.show()

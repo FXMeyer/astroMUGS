@@ -123,28 +123,51 @@ class Grid:
 
         return np.stack((x, y, z)), np.stack((w1, w2, w3))
 
-    def set_spherical_grid(self, log=True):
-        self.coordsystem = "spherical"
-        rmin = self.params.rin
-        rmax = self.params.rout
-        nr = self.params.nr
-        ntheta = self.params.ntheta
-        nphi = self.params.nphi
-        if log:
-            r_edge = np.logspace(np.log10(rmin), np.log10(rmax), nr, base=10)
-        else:
-            r_edge = np.linspace(rmin, rmax, nr)
+    def set_spherical_grid(self, r_edge=None, theta_edge=None, phi_edge=None, log=True):
+        """Set the spherical grid.
 
-        theta_edge = np.linspace(0.0, np.pi, ntheta)
-        phi_edge = np.linspace(0.0, 2*np.pi, nphi)
+        If edge arrays are provided (e.g. read from an existing amr_grid.inp),
+        use them directly. Otherwise, compute edges from the DiskParams
+        (rin, rout, nr, ntheta, nphi).
+
+        Parameters
+        ----------
+        r_edge : array-like, optional
+            Radial cell edges in au. If None, computed from params.
+        theta_edge : array-like, optional
+            Polar cell edges in radians. If None, computed from params.
+        phi_edge : array-like, optional
+            Azimuthal cell edges in radians. If None, computed from params.
+        log : bool
+            Use logarithmic spacing for radial edges (only when computing from params).
+        """
+        self.coordsystem = "spherical"
+
+        if r_edge is not None:
+            r_edge = np.asarray(r_edge)
+            theta_edge = np.asarray(theta_edge)
+            phi_edge = np.asarray(phi_edge)
+        else:
+            rmin = self.params.rin
+            rmax = self.params.rout
+            nr = self.params.nr
+            ntheta = self.params.ntheta
+            nphi = self.params.nphi
+            if log:
+                r_edge = np.logspace(np.log10(rmin), np.log10(rmax), nr, base=10)
+            else:
+                r_edge = np.linspace(rmin, rmax, nr)
+
+            theta_edge = np.linspace(0.0, np.pi, ntheta)
+            phi_edge = np.linspace(0.0, 2*np.pi, nphi)
 
         self.r = 0.5*(r_edge[0:r_edge.size-1] + r_edge[1:r_edge.size])
         self.theta = 0.5*(theta_edge[0:theta_edge.size-1] + theta_edge[1:theta_edge.size])
         self.phi = 0.5*(phi_edge[0:phi_edge.size-1] + phi_edge[1:phi_edge.size])
 
-        self.nr = nr
-        self.ntheta = ntheta
-        self.nphi = nphi
+        self.nr = r_edge.size
+        self.ntheta = theta_edge.size
+        self.nphi = phi_edge.size
         self.r_edge = r_edge
         self.theta_edge = theta_edge
         self.phi_edge = phi_edge

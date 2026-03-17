@@ -401,9 +401,9 @@ def avnh_factor(nH_to_AV_conversion, dtogas, rgrain, nbz): # rgrain provided in 
     av_nh = (1/nH_to_AV_conversion)*(dtogas/1e-2)*(1e-5/(rgrain*1e-4))*np.ones(nbz)
     return av_nh
 
-def static(path, dist, gas_density, T_gas, av_z, T_dust, dust_density, r_grain, avnh_fact, uvfactor):
+def static(path, dist, gas_density, T_gas, av_z, T_dust, dust_density, r_grain, avnh_fact, uvfactor, min_gas_density=1e0):
     distance = dist
-    nh = gas_density#*2
+    nh = np.maximum(gas_density, min_gas_density)
     Tgas = T_gas#*1.02
     avz = av_z#/1.05#*2.8
     #avz = np.where(avz>45, avz*1.05, avz)

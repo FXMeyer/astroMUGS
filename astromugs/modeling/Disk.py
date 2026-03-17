@@ -90,7 +90,14 @@ class Disk:
 	    args:
 	    	-r:                     distance from the star [au]
         """
-        if self.params.sigma_gas_ref != None:
+        if self.params.sigma_compute == 'custom':
+            r_custom, _, siggas_table = custom.surfacedensities(self.params.sigma_path)
+            r_flat = np.clip(r.ravel() if hasattr(r, 'ravel') else np.atleast_1d(r), r_custom[0], r_custom[-1])
+            sigma_g = np.interp(r_flat, r_custom, siggas_table)
+            if hasattr(r, 'shape'):
+                sigma_g = sigma_g.reshape(r.shape)
+            return sigma_g
+        elif self.params.sigma_gas_ref != None:
             sigma_g = 2*self.params.sigma_gas_ref*(r/(self.params.ref_radius))**(-self.params.p_exp)  #2 or not??
         else:
             sigma_g = (1/self.params.dtogas)*self.sigma_d0*(r/(self.params.ref_radius))**(-self.params.p_exp)

@@ -8,8 +8,10 @@ import numpy as np
 from astromugs import radmc3d
 from astromugs import nautilus
 from astromugs.modeling.Grid import Grid
+from astromugs.modeling.Disk import Disk
 from astromugs.utils.struct import StructureParams
 from astromugs.utils.thermal import ThermalParams
+from astromugs.utils import custom as custom_io
 
 from astromugs.constants.constants import autocm, M_sun, R_sun, c, amu, mu, black_body
 from astromugs.modeling.InterstellarRadFields import InterstellarRadFields
@@ -308,10 +310,30 @@ class Model:
     # ----WRITE NAUTILUS INPUT FILES----
     # ----------------------------------
     #If coupling_dens == True, the code assumes the user did not add a disk or envelope structure and that there is no calculation of Hg, ng, nd, etc. 
-    def write_nautilus(self, sizes=np.array([[0.1]]), uv_ref=3400, nH_to_AV_conversion=1.600e+21, rsingle=0.1, dtogas=1e-2, ref_radius=100,\
-                       stop_time=3e6, nb_outputs = 64, tunneling=1, is_h2_formation_rate=0, temp_gas='dust', static=True, param=True, element=True, abundances='atomic', \
-                       network=True, multi_grain=True, tempdecoup=True,\
-                       coupling_dens=False, coupling_temp=True, coupling_av=True, **keywords):
+    def write_nautilus(self, sizes=np.array([[0.1]]), 
+                       uv_ref=3400, 
+                       nH_to_AV_conversion=1.600e+21, 
+                       rsingle=0.1, 
+                       dtogas=1e-2, 
+                       ref_radius=100,
+                       stop_time=3e6, 
+                       nb_outputs = 64, 
+                       tunneling=1, 
+                       is_h2_formation_rate=0, 
+                       min_gas_density=1e0,
+                       min_av=1e-2, 
+                       temp_gas='dust', 
+                       static=True, 
+                       param=True, 
+                       element=True, 
+                       abundances='atomic',
+                       network=True, 
+                       multi_grain=True, 
+                       tempdecoup=True,
+                       coupling_dens=False, 
+                       coupling_temp=True, 
+                       coupling_av=True, 
+                       **keywords):
         
         #-----------------------------------------
         # REMOVE IF EXISTS AND CREATE CHEMISTRY FOLDER
@@ -404,6 +426,16 @@ class Model:
         #-----------------------------------------
         if coupling_dens == True:
             n_dust, n_gas = nautilus.coupling.dust_density(dtogas, rho_m, a, dust_density, self.grid.rchem*autocm, self.grid.zchem*autocm, self.grid.r, self.grid.theta)
+
+            # If custom sigma, override n_gas with gas density from the custom file
+            if self.params.disk.sigma_compute == 'custom' and len(self.grid.hg_chem) == 0:
+                r_custom, _, siggas_table = custom_io.surfacedensities(self.params.disk.sigma_path)
+                temp_disk = Disk(params=self.params.disk, dust=self.grid.dust[0])
+                hg = temp_disk.scaleheight(self.grid.rchem)  # cm
+                for idx, r in enumerate(self.grid.rchem):
+                    sig_g = np.interp(r, r_custom, siggas_table)
+                    z_cm = self.grid.zchem[idx, :] * autocm
+                    n_gas[idx, :] = (sig_g / (np.sqrt(2*np.pi) * hg[idx] * mu * amu)) * np.exp(-z_cm**2 / (2*hg[idx]**2))
         if coupling_temp == True:
            if not self.grid.temperature:
                print('coupling_temp==True: The file thermal/dust_temperature.dat is not present or is corrupted. Chemistry model cannot created.')
@@ -488,7 +520,9 @@ class Model:
                                     nd, \
                                     rsingle, \
                                     avnh_fact,
-                                    uvfactor)
+                                    uvfactor,
+                                    min_gas_density=min_gas_density,
+                                    min_av = min_av)
             if multi_grain == True:
                 if param == True:
                     nautilus.write.parameters_nmgc(path, grain_temp='fixed_to_dust_size', nb_outputs=nb_outputs, multi_grain=1, resolution=self.grid.nz_chem, tunneling=tunneling, is_h2_formation_rate=is_h2_formation_rate, stop_time=stop_time, uv_flux=np.mean(uvfactor), **keywords)
@@ -514,7 +548,9 @@ class Model:
                                     nd, #if nbspecies > 1, the column is not read. \
                                     rsingle, #if nbspecies > 1, the column is not read. \
                                     avnh_fact,
-                                    uvfactor)
+                                    uvfactor,
+                                    min_gas_density=min_gas_density,
+                                    min_av = min_av)
             
                 if nbspecies > 1: 
                     if len(self.grid.hg_chem) > 0:
@@ -523,7 +559,7 @@ class Model:
                     elif coupling_dens == True: 
                         nH = n_gas[idx, :]
                         nd = n_dust[:, idx, :]
-                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:])
+                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density)
                 else:
                     print('WARNING: multi_grain = True, but the model has only one grain bin. Please, check the number of grain size or switch multi_grain to False.')
 

@@ -1,7 +1,7 @@
 import numpy as np
 from shutil import copy
 import os
-from ..constants.constants import c, autocm, black_body
+from ..constants.constants import c, autocm, black_body, mu, amu
 
 
 def parameters(path, resolution, phase=1, \
@@ -324,18 +324,18 @@ def parameters_nmgc(path, resolution, phase=1, \
     f.write("minimum_initial_abundance =  {0:.3E} ! default minimum initial fraction abundance\n".format(minimum_initial_abundance))
     f.close()
 
-def grain_sizes(path, sizes, gas_density, dust_density, T_dust):
+def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, dtogas=1e-2):
+    min_dust_density = dtogas * mu * amu * min_gas_density
     f = open(path + '1D_grain_sizes.in',"w")
     f.write('! grain-radius [cm] 1/abundance  grain-temp CR-peak-Temperaturegrain[K] spatial-point\n')
     f.write('\n')
+    nh = np.maximum(gas_density, min_gas_density)
     for zi in range(0, len(gas_density)):
         for ai, a in enumerate(sizes[-1]*1e-4):
             f.write('%10.4E ' %a)
         f.write('    ')
         for ai, a in enumerate(sizes[-1]):
-            inv_ab = gas_density[zi]/dust_density[ai, zi]
-            if inv_ab > 1e+41:
-                inv_ab = 1e+41 # corresponds to rougly 1 grain per AU^3... A smaller value does not make much sense and Nautilus works poorly with such small densities. 
+            inv_ab = nh[zi]/max(dust_density[ai, zi], min_dust_density)
             f.write('%12.6E ' %inv_ab)
         f.write('    ')
         for ai, a in enumerate(sizes[-1]):
@@ -401,11 +401,22 @@ def avnh_factor(nH_to_AV_conversion, dtogas, rgrain, nbz): # rgrain provided in 
     av_nh = (1/nH_to_AV_conversion)*(dtogas/1e-2)*(1e-5/(rgrain*1e-4))*np.ones(nbz)
     return av_nh
 
-def static(path, dist, gas_density, T_gas, av_z, T_dust, dust_density, r_grain, avnh_fact, uvfactor, min_gas_density=1e0):
+def static(path, dist, gas_density, 
+           T_gas, 
+           av_z, 
+           T_dust, 
+           dust_density, 
+           r_grain, 
+           avnh_fact,
+           uvfactor, 
+           min_gas_density=1e0,
+           min_av=1e-3, 
+           dtogas=1e-2):
     distance = dist
     nh = np.maximum(gas_density, min_gas_density)
+    min_dust_density = dtogas * mu * amu * min_gas_density
     Tgas = T_gas#*1.02
-    avz = av_z#/1.05#*2.8
+    avz = np.maximum(av_z, min_av)#/1.05#*2.8
     #avz = np.where(avz>45, avz*1.05, avz)
 
     #avz = np.where((avz >= 50) & (avz <= 72*1.4), avz*1.2, avz)
@@ -414,7 +425,7 @@ def static(path, dist, gas_density, T_gas, av_z, T_dust, dust_density, r_grain, 
     Tdust = T_dust #if 1 size. If several sizes, Tdust will be the surface weigthed temperature
     avnhfact = avnh_fact
     rgrain = r_grain*1e-4*np.ones(len(dist))
-    inv_ab = gas_density/dust_density
+    inv_ab = nh/np.maximum(dust_density, min_dust_density)
     uvf = uvfactor#*10
 
     static_array = np.stack((distance, nh, Tgas, avz, diff_coef, Tdust, inv_ab, avnhfact, rgrain, uvf), axis=-1)

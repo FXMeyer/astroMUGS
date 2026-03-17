@@ -240,7 +240,7 @@ def avz_disk(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta, hg
     #CREATE Av MAP
     for idx in range(len(rchem)):
         for idz in range(len(zchem)):
-            avz[idx, idz] = abs(-1.086*np.log(field_naut[idx,idz]/field_naut[idx, idz]))   #field0[idx]))
+            avz[idx, idz] = abs(-1.086*np.log(field_naut[idx,idz]/bbint_map[idx, idz]))   #field0[idx]))
             avz[idx,1:][avz[idx,1:]==0.0] = np.trim_zeros(avz[idx])[0]
     
     # avz_df = pd.DataFrame(data=avz.transpose())

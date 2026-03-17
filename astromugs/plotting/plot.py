@@ -65,16 +65,23 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', den
     axes = np.atleast_2d(axes)
 
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
 
     for idx in range(nrows * ncols):
         ax = axes.flat[idx]
         if idx < nspecies:
             if dens_type == 'number':
+                im = ax.pcolormesh(R, Z, dens[idx]/grain_mass[idx], cmap=cmap, shading='auto',
+                                   norm=LogNorm(vmin=vmin, vmax=vmax))
+                fig.colorbar(im, cax=cbar_ax, label=r'n$_\mathrm{d}$ [cm$^{-3}$]')
+            if dens_type == 'surface':
                 im = ax.pcolormesh(R, Z, 4*np.pi*sizes[idx]*1e-4*dens[idx]/grain_mass[idx], cmap=cmap, shading='auto',
                                    norm=LogNorm(vmin=vmin, vmax=vmax))
+                fig.colorbar(im, cax=cbar_ax, label=r'surfaces [cm$^{-1}$]')
             elif dens_type == 'mass':
                 im = ax.pcolormesh(R, Z, dens[idx], cmap=cmap, shading='auto',
                                    norm=LogNorm(vmin=vmin, vmax=vmax))
+                fig.colorbar(im, cax=cbar_ax, label=r'$\rho_\mathrm{d}$ [g cm$^{-3}$]')
             ax.set_title(f'bin {idx+1}', fontsize=12)
             if sizes is not None and idx < len(sizes):
                 s = sizes[idx]
@@ -107,8 +114,8 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', den
         ax.set_ylabel('z [au]', fontsize=14)
 
     fig.subplots_adjust(right=0.88, hspace=0.15, wspace=0.08)
-    cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
-    fig.colorbar(im, cax=cbar_ax, label=r'$\rho_\mathrm{d}$ [g cm$^{-3}$]')
+    
+    #fig.colorbar(im, cax=cbar_ax, label=r'$\rho_\mathrm{d}$ [g cm$^{-3}$]')
 
     plt.show()
 

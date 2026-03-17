@@ -1,68 +1,63 @@
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
 from ..constants.constants import c, autocm, amu, mu, black_body
 
 def moving_average(x, w):
     return np.convolve(x, np.ones(w), 'same') / w
 
-def dust_density(dtogas, rho_m, sizes, dens_radmc3d, rchem, zchem, d, theta): 
+def dust_density(dtogas, rho_m, sizes, dens_radmc3d, rchem, zchem, d, theta):
+    """Interpolate RADMC3D dust density (spherical) onto the Nautilus chemistry grid (cylindrical).
+
+    Uses bilinear interpolation on the (r_sph, theta) grid instead of nearest-neighbor,
+    preserving radial drift gradients and smooth disk boundaries.
+    """
     nbspecies, nz, ny, nx = dens_radmc3d.shape
-    dens_naut = np.zeros((len(dens_radmc3d), len(rchem), len(zchem[0,:])))
-    dens_naut_nd_smooth = np.zeros((len(dens_radmc3d), len(rchem), len(zchem[0,:])))
-    dens_naut_nH_smooth = np.zeros((len(rchem), len(zchem[0,:])))
-    dens_naut_nd = np.zeros((len(dens_radmc3d), len(rchem), len(zchem[0,:])))
-    dens_naut_nH = np.zeros((len(rchem), len(zchem[0,:])))
-    for idx_size in range(0, nbspecies, 1):
-        for idx, r in enumerate(rchem):
-            for idz, z in enumerate(zchem[idx, :]):
-                d_pt = np.sqrt(r**2 + z**2)  #convert from cartesian to spherical
-                theta_pt = np.arccos(z/d_pt) #convert from cartesian to spherical
-                closest_d = min(enumerate(d), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
-                closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
-                dens_naut[idx_size, idx, idz] = dens_radmc3d[idx_size, 0, closest_t[0], closest_d[0]] 
+    nrchem = len(rchem)
+    nzchem = zchem.shape[1]
 
-    #get gas number density:
-    for ai in range(0, len(dens_radmc3d), 1):
-        dens_naut_nH += dens_naut[ai, :, :]
-    dens_naut_nH = (1/dtogas)*dens_naut_nH
-    dens_naut_nH = dens_naut_nH/(mu*amu)
+    dens_naut = np.zeros((nbspecies, nrchem, nzchem))
 
-    #then convert g.cm-3 to number density for the grains too:
-    for ai in range(0, len(dens_radmc3d), 1):
-        mass = (4/3)*np.pi*rho_m*sizes[ai]**3
-        dens_naut_nd[ai, :, :] = dens_naut[ai, :, :]/mass
+    # Convert RADMC3D grid from au to cm to match rchem/zchem units
+    d_cm = d * autocm
 
+    # Build query points: convert cylindrical (rchem, zchem) -> spherical (d_pt, theta_pt)
+    # zchem has shape (nrchem, nzchem) — z values can differ per radius
+    d_pts = np.sqrt(rchem[:, None]**2 + zchem**2)            # (nrchem, nzchem) in cm
+    theta_pts = np.arccos(np.clip(zchem / d_pts, -1, 1))     # (nrchem, nzchem)
 
-    # for idx in range(len(rchem)):
-    #     for size_id in range(nbspecies):
-    #         dens_naut_nd_smooth[size_id, idx, :] = moving_average(dens_naut_nd[size_id, idx, :], 5) #average the values over a rolling window of 5 points.
-    # dens_naut_nd_smooth[:, :, 0:2] = dens_naut_nd[:, :, 0:2]  #clean the boundary effects
-    # dens_naut_nd_smooth[:, :, -2:] = dens_naut_nd[:, :, -2:] 
+    # Clamp query points to the RADMC3D grid range to avoid extrapolation
+    d_pts = np.clip(d_pts, d_cm[0], d_cm[-1])
+    theta_pts = np.clip(theta_pts, theta[0], theta[-1])
 
+    # Stack into (N, 2) array for the interpolator
+    query = np.column_stack([d_pts.ravel(), theta_pts.ravel()])
 
-    # for idx in range(len(rchem)):
-    #     dens_naut_nH_smooth[idx, :] = moving_average(dens_naut_nH[idx, :], 5) #average the values over a rolling window of 5 points.
-    # dens_naut_nH_smooth[:, 0:2] = dens_naut_nH[:, 0:2]  #clean the boundary effects
-    # dens_naut_nH_smooth[:, -2:] = dens_naut_nH[:, -2:] 
+    for idx_size in range(nbspecies):
+        # dens_radmc3d shape is (nspecies, nphi, ntheta, nr) — take phi=0
+        data_2d = dens_radmc3d[idx_size, 0, :, :]  # (ntheta, nr)
+        # RegularGridInterpolator expects data on (d, theta) axes
+        # data_2d is indexed as [itheta, ir], so transpose to [ir, itheta]
+        interp = RegularGridInterpolator(
+            (d_cm, theta), data_2d.T, method='linear', bounds_error=False, fill_value=0.0
+        )
+        dens_naut[idx_size] = interp(query).reshape(nrchem, nzchem)
 
-    # # #--------------------------------
-    # import matplotlib.pyplot as plt
-    # from matplotlib.colors import LogNorm
-    # fig = plt.figure(figsize=(10, 8.))
-    # ax = fig.add_subplot(111)
-    # plt.xlabel(r'r', fontsize = 17)
-    # plt.ylabel(r'z', fontsize = 17, labelpad=-7.4)
-    # zz, rr = np.meshgrid(zchem, rchem) #inverse r,z because dim is (len(r), len(z))
-    # t = plt.pcolormesh(rr/autocm, zz/autocm, dens_naut_d[0, :,:], cmap='gnuplot2', shading='auto', norm=LogNorm(vmin=1e-35, vmax=1e-15), rasterized=True)
-    # #t = plt.contourf(rr/autocm, zz/autocm, dens_naut[0, :,:], levels=[0.1,1,8,10,20,30,40,50,60, 70, 80], cmap='jet', rasterized=True)
-    # clr = plt.colorbar(t)
-    # plt.show()
-    # # #-----------------------------------
+    # Gas number density from total dust
+    dens_naut_nH = dens_naut.sum(axis=0) / dtogas / (mu * amu)
 
-    return dens_naut_nd, dens_naut_nH   
+    # Dust number density per grain size
+    dens_naut_nd = np.zeros_like(dens_naut)
+    for ai in range(nbspecies):
+        mass = (4./3.) * np.pi * rho_m * sizes[ai]**3
+        dens_naut_nd[ai] = dens_naut[ai] / mass
+
+    return dens_naut_nd, dens_naut_nH
 
 
 def dust_temperature_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
     nbspecies, nz, ny, nx = temp_radmc3d.shape
+
+    d_cm = d * autocm  # convert RADMC3D grid from au to cm
 
     hhg, zz = np.meshgrid(hg, zchem, indexing='ij')
     zz = hhg*zz
@@ -73,7 +68,7 @@ def dust_temperature_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
             for alt in range(len(zchem)):
                 d_pt = np.sqrt(r**2 + zz[idx, alt]**2)  #convert from cartesian to spherical
                 theta_pt = np.arccos(zz[idx, alt]/d_pt) #convert from cartesian to spherical
-                closest_d = min(enumerate(d), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
+                closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
                 closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
                 #temp_naut[size_id, idx, alt] = temp_radmc3d[size_id, closest_d[0], closest_t[0], 0] 
                 temp_naut[size_id, idx, alt] = temp_radmc3d[size_id, 0, closest_t[0], closest_d[0]] 
@@ -90,6 +85,8 @@ def dust_temperature_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
 def dust_temperature_single_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
     nz, ny, nx = temp_radmc3d.shape
 
+    d_cm = d * autocm  # convert RADMC3D grid from au to cm
+
     hhg, zz = np.meshgrid(hg, zchem, indexing='ij')
     zz = hhg*zz
     temp_naut = np.ones((len(rchem), len(zchem)))
@@ -99,7 +96,7 @@ def dust_temperature_single_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
         for alt in range(len(zchem)):
             d_pt = np.sqrt(r**2 + zz[idx, alt]**2)  #convert from cartesian to spherical
             theta_pt = np.arccos(zz[idx, alt]/d_pt) #convert from cartesian to spherical
-            closest_d = min(enumerate(d), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
+            closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
             closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
             temp_naut[idx, alt] = temp_radmc3d[0, closest_t[0], closest_d[0]] 
 
@@ -115,6 +112,8 @@ def dust_temperature_single_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
 def dust_temperature(temp_radmc3d, rchem, zchem, d, theta):
     nbspecies, nz, ny, nx = temp_radmc3d.shape
 
+    d_cm = d * autocm  # convert RADMC3D grid from au to cm
+
     temp_naut = np.ones((nbspecies, len(rchem), len(zchem[0, :])))
     temp_naut_smooth = np.ones((nbspecies, len(rchem), len(zchem[0, :])))
 
@@ -123,7 +122,7 @@ def dust_temperature(temp_radmc3d, rchem, zchem, d, theta):
             for idz, z in enumerate(zchem[idx, :]):
                 d_pt = np.sqrt(r**2 + z**2)  #convert from cartesian to spherical
                 theta_pt = np.arccos(z/d_pt) #convert from cartesian to spherical
-                closest_d = min(enumerate(d), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
+                closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
                 closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
                 temp_naut[size_id, idx, idz] = temp_radmc3d[size_id, 0, closest_t[0], closest_d[0]] 
 
@@ -155,6 +154,8 @@ def dust_temperature(temp_radmc3d, rchem, zchem, d, theta):
 def dust_temperature_single(temp_radmc3d, rchem, zchem, d, theta):
     nz, ny, nx = temp_radmc3d.shape
 
+    d_cm = d * autocm  # convert RADMC3D grid from au to cm
+
     temp_naut = np.ones((len(rchem), len(zchem[0,:])))
     temp_naut_smooth = np.ones((len(rchem), len(zchem[0,:])))
 
@@ -162,7 +163,7 @@ def dust_temperature_single(temp_radmc3d, rchem, zchem, d, theta):
         for idz, z in enumerate(zchem[idx, :]):
             d_pt = np.sqrt(r**2 + z**2)  #convert from cartesian to spherical
             theta_pt = np.arccos(z/d_pt) #convert from cartesian to spherical
-            closest_d = min(enumerate(d), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
+            closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
             closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
             temp_naut[idx, idz] = temp_radmc3d[0, closest_t[0], closest_d[0]] 
 
@@ -195,6 +196,7 @@ def local_field():
 
 def avz_disk(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta, hg):
     nlam, nph, nt, nr = field_radmc3d.shape
+    d_cm = d * autocm  # convert RADMC3D grid from au to cm
     lamuv = np.where((lam_mono <= 0.2)) # extract the ~ uv
     if len(lamuv[0]) == len(lam_mono):
         extrawave = lam_mono[lamuv[0][-1]] - lam_mono[lamuv[0][-2]]
@@ -202,7 +204,7 @@ def avz_disk(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta, hg
         lam_mono = np.append(lam_mono, extrawave)
     freq = c/(lam_mono*1e-6)
     fieldint = np.zeros((nt, nr))
-    bbint = 0 
+    bbint = 0
 
     # Integrate over uv frequencies:
     for i in lamuv[0]:
@@ -226,7 +228,7 @@ def avz_disk(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta, hg
         for z in range(len(zchem)):
             d_pt = np.sqrt(r**2 + zz[idx, z]**2)  #convert from cartesian to spherical
             theta_pt = np.arccos(zz[idx, z]/d_pt) #convert from cartesian to spherical
-            closest_d = min(enumerate(d), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
+            closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
             closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
             field_naut[idx, z] = fieldint[closest_t[0], closest_d[0]]
     # Smoothing vertical profiles
@@ -249,6 +251,7 @@ def avz_disk(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta, hg
 
 def av_z(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta):
     nlam, nph, nt, nr = field_radmc3d.shape
+    d_cm = d * autocm  # convert RADMC3D grid from au to cm
     lamuv = np.where((lam_mono <= 0.2)) # extract the ~ uv
     if len(lamuv[0]) == len(lam_mono):
         extrawave = lam_mono[lamuv[0][-1]] - lam_mono[lamuv[0][-2]]
@@ -279,7 +282,7 @@ def av_z(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta):
         for idz, z in enumerate(zchem[idx, :]):
             d_pt = np.sqrt(r**2 + z**2)  #convert from cartesian to spherical
             theta_pt = np.arccos(z/d_pt) #convert from cartesian to spherical
-            closest_d = min(enumerate(d), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
+            closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
             closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
             field_naut[idx, idz] = fieldint[closest_t[0], closest_d[0]]
     # Smoothing vertical profiles

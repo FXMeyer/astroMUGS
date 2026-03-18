@@ -6,7 +6,7 @@ myst:
       pydata-sphinx-theme.
 ---
 
-# astroMUGS in details
+# Graphical User Interface: astroMUGS-ui
 
 A detailed description of the graphical user interface of astroMUGS.
 
@@ -14,5 +14,7 @@ A detailed description of the graphical user interface of astroMUGS.
 ```{toctree}
 :caption: Graphical User Interface: astroMUGS-ui
 
-graphic
+install
+run
+nodes
 ```

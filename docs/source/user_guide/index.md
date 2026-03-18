@@ -26,3 +26,16 @@ install
 
 basicuse
 ```
+
+```{toctree}
+:caption: The package in details
+
+radiative
+chemistry
+```
+
+```{toctree}
+:caption: Graphical User Interface: astroMUGS-ui
+
+graphic
+```

@@ -321,7 +321,8 @@ class Model:
                        tunneling=1, 
                        is_h2_formation_rate=0, 
                        min_gas_density=1e0,
-                       min_av=1e-2, 
+                       min_av=1e-2,
+                       max_uv=None,
                        temp_gas='dust', 
                        static=True, 
                        param=True, 
@@ -522,7 +523,8 @@ class Model:
                                     avnh_fact,
                                     uvfactor,
                                     min_gas_density=min_gas_density,
-                                    min_av = min_av)
+                                    min_av = min_av,
+                                    max_uv=max_uv)
             if multi_grain == True:
                 if param == True:
                     nautilus.write.parameters_nmgc(path, grain_temp='fixed_to_dust_size', nb_outputs=nb_outputs, multi_grain=1, resolution=self.grid.nz_chem, tunneling=tunneling, is_h2_formation_rate=is_h2_formation_rate, stop_time=stop_time, uv_flux=np.mean(uvfactor), **keywords)
@@ -550,7 +552,8 @@ class Model:
                                     avnh_fact,
                                     uvfactor,
                                     min_gas_density=min_gas_density,
-                                    min_av = min_av)
+                                    min_av = min_av,
+                                    max_uv=max_uv)
             
                 if nbspecies > 1: 
                     if len(self.grid.hg_chem) > 0:

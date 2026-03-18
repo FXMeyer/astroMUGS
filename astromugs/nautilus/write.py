@@ -401,16 +401,17 @@ def avnh_factor(nH_to_AV_conversion, dtogas, rgrain, nbz): # rgrain provided in 
     av_nh = (1/nH_to_AV_conversion)*(dtogas/1e-2)*(1e-5/(rgrain*1e-4))*np.ones(nbz)
     return av_nh
 
-def static(path, dist, gas_density, 
-           T_gas, 
-           av_z, 
-           T_dust, 
-           dust_density, 
-           r_grain, 
+def static(path, dist, gas_density,
+           T_gas,
+           av_z,
+           T_dust,
+           dust_density,
+           r_grain,
            avnh_fact,
-           uvfactor, 
+           uvfactor,
            min_gas_density=1e0,
-           min_av=1e-3, 
+           min_av=1e-3,
+           max_uv=None,
            dtogas=1e-2):
     distance = dist
     nh = np.maximum(gas_density, min_gas_density)
@@ -427,6 +428,9 @@ def static(path, dist, gas_density,
     rgrain = r_grain*1e-4*np.ones(len(dist))
     inv_ab = nh/np.maximum(dust_density, min_dust_density)
     uvf = uvfactor#*10
+    # Cap UV where density is at the floor
+    if max_uv is not None:
+        uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, max_uv), uvf)
 
     static_array = np.stack((distance, nh, Tgas, avz, diff_coef, Tdust, inv_ab, avnhfact, rgrain, uvf), axis=-1)
     header_static = "z [AU] ; H Gas density [part/cm^3] ; Tgas [K] ; Av [mag] ; Diffusion coef [cm^2/s]; Tdust [K]; 1/ab of grains ; AV/NH conversion factor ; Grain radius (cm) ; uv factor in unit of the reference flux"

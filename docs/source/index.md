@@ -40,6 +40,10 @@ This is where it all begins.
 :maxdepth: 2
 
 user_guide/index
+
+details/index
+
+graphical/index
 ```
 
 <!-- ## Community and contribution guide

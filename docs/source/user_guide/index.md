@@ -8,12 +8,11 @@ myst:
 
 # Quickstart
 
-A quick introduction to install, use astromugs, and understand its structure. A description of all parameters and functions are described in other sections.
+A quick introduction to install, use astromugs, and understand its structure. 
 
 > **WARNING:**
 > Make sure that you have nmgc and radmc3d installed on your machine before starting. Note that NAUTILUS will soon be embedded inside astromugs.
 
-you may ask why stellar mass is defined twice (in struct and thermal.py). That is because it happens, sometimes, that the user needs to define the stellar mass differently when building the physical structure and for the thermal computation.
 
 ```{toctree}
 :caption: Get started
@@ -25,17 +24,4 @@ install
 :caption: Basic use
 
 basicuse
-```
-
-```{toctree}
-:caption: The package in details
-
-radiative
-chemistry
-```
-
-```{toctree}
-:caption: Graphical User Interface: astroMUGS-ui
-
-graphic
 ```

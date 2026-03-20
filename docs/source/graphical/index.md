@@ -13,7 +13,7 @@ A node-based graphical user interface (GUI) of astroMUGS. This section provides 
 
 ```{toctree}
 :caption: Graphical User Interface: astroMUGS-ui
-
+introduction
 install
 run
 nodes

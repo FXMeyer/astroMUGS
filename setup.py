@@ -28,5 +28,12 @@ setuptools.setup(
         "astromugs.dust": 'astromugs/dust'}, \
         package_data={\
         'astromugs.nautilus': ['network/*.in']}, \
+    install_requires=[
+        "numpy",
+        "scipy",
+        "matplotlib",
+        "zarr",
+        "xarray",
+    ],
     python_requires=">=3.10",
 )

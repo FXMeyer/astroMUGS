@@ -10,7 +10,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "astromugs"
 authors = [{name = "Sacha Gavino", email = "sacha.gavino@unibo.it"}]
-description = "A package to runs postprocessing of MUlti-Grain simulations." 
+description = "A package to runs postprocessing of MUlti-Grain simulations."
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "zarr",
+    "xarray",
+]
 dynamic = ["version", "readme", "classifiers", "requires-python"]
 
 

@@ -35,11 +35,35 @@ from astromugs.constants.constants import (
 #  |_______/  |__|  |_______|  |__| \__\
 #___________________________________________
 class Disk:
+    """Static flared disk model for radiative transfer and chemistry simulations.
+
+    Provides methods to compute gas and dust physical quantities (density,
+    temperature, scale height, surface density, extinction) on various
+    coordinate grids.
+
+    Parameters
+    ----------
+    params : DiskParams
+        Dataclass holding all disk model parameters.
+    dust : object, optional
+        Dust model object providing grain size distributions and opacities.
+    """
+
     def __init__(
-        self, 
-        params: DiskParams, 
+        self,
+        params: DiskParams,
         dust: Optional[object] = None
     ):
+        """Initialize the Disk model.
+
+        Parameters
+        ----------
+        params : DiskParams
+            Dataclass holding all disk model parameters. Its fields are also
+            copied as instance attributes for convenience.
+        dust : object, optional
+            Dust model object providing grain size distributions and opacities.
+        """
         self.params = params
         self.dust = dust
 
@@ -47,30 +71,24 @@ class Disk:
         for field in params.__dataclass_fields__:
             setattr(self, field, getattr(params, field))
 
-
-    """
-	The following methods give the physical parameters related to the gas phase in the disk.
-	The gas is given by Hydrogren nuclei. Equation references are related to the documentation.
-	Instance methods:
-        A) scaleheight(self, r)
-        B) surfacedensity(self, r)
-        C) omega2(self, r)
-        D) temp_mid(self, r)
-        E) temp_atmos(self, r)
-        F) temp_altitude(self, r, z)
-        G) density_gauss(self, x1, x2, x3=None)
-        H) density(self, x1, x2, x3=None)
-        I) numberdensity(self, x1, x2, x3=None)
-        J) viscous_accretion_heating(self, x1, x2, x3=None)
-    """
-
     def scaleheight(self, r):
-        """ A)
-        Returns gas scale height using the power law. Units: [cm].
-        Parameters:
-            -q_exp:         radial profile exponent. Will set the aspect ratio of the disk. If q_exp = 3, the disk is flat 
-        	-r:             distances from the star - can be a list [au]
-            -R_ref:         reference radius [au]
+        """Compute the gas scale height using a power-law profile.
+
+        Parameters
+        ----------
+        r : float or array_like
+            Distance(s) from the star in AU.
+
+        Returns
+        -------
+        hgas : float or ndarray
+            Gas scale height in cm.
+
+        Notes
+        -----
+        The flaring exponent is derived as ``h_exp = 3/2 - q_exp/2``.
+        When ``q_exp = 3`` the disk is geometrically flat. The scale height
+        is computed from ``h0`` if provided, otherwise from ``tmidplan_ref``.
         """
         h_exp = (3./2.) - (self.params.q_exp/2.)
         if self.params.h0 != None: 
@@ -85,10 +103,17 @@ class Disk:
 
 
     def surfacedensity(self, r):
-        """ B)
-	    Surface density of the gas. Unit: g.cm-2
-	    args:
-	    	-r:                     distance from the star [au]
+        """Compute the gas surface density.
+
+        Parameters
+        ----------
+        r : float or array_like
+            Distance(s) from the star in AU.
+
+        Returns
+        -------
+        sigma_g : float or ndarray
+            Gas surface density in g/cm^2.
         """
         if self.params.sigma_compute == 'custom':
             r_custom, _, siggas_table = custom.surfacedensities(self.params.sigma_path)
@@ -104,31 +129,65 @@ class Disk:
         return sigma_g
 
     def omega2(self, r):
-        """ C)
-        Returns square of the Keplerian angular velocity.
-        Args:
-            -r:        distance from the star [au]
+        """Compute the square of the Keplerian angular velocity.
+
+        Parameters
+        ----------
+        r : float or array_like
+            Distance(s) from the star in AU.
+
+        Returns
+        -------
+        float or ndarray
+            Keplerian angular velocity squared in s^-2.
         """
         return (Ggram*self.params.star_mass*M_sun)/(r*autocm)**3
 
 
     def temp_mid(self, r):
-        """ D)
-        Radial temperature profile in the midplane. Unit: Kelvin
-        Args: 
-	        -r:             distance from the star [au]
+        """Compute the midplane temperature radial profile.
+
+        Parameters
+        ----------
+        r : float or array_like
+            Distance(s) from the star in AU.
+
+        Returns
+        -------
+        float or ndarray
+            Midplane temperature in K.
         """
         return self.params.tmidplan_ref*(r/self.params.ref_radius)**(-self.params.q_exp)
 
     def temp_atmos(self, r):
-        """ E)
-	    Temperature profile in altitude. Unit: Kelvin   
-	    """
+        """Compute the atmospheric temperature radial profile.
+
+        Parameters
+        ----------
+        r : float or array_like
+            Distance(s) from the star in AU.
+
+        Returns
+        -------
+        float or ndarray
+            Atmospheric temperature in K.
+        """
         return self.params.tatmos_ref*(r/self.params.ref_radius)**(-self.params.q_exp)
 
     def temp_altitude(self, r, z):
-        """ F)
-        Temperature vertical profile using the definition by Williams and Best (2014). Unit: Kelvin.
+        """Compute the vertical temperature profile following Williams & Best (2014).
+
+        Parameters
+        ----------
+        r : array_like
+            Radial distances from the star in AU.
+        z : array_like
+            Normalized altitude coordinates (in units of scale height).
+
+        Returns
+        -------
+        ndarray
+            Temperature array of shape ``(len(r), len(z))`` in K.
         """
         hg = self.scaleheight(r)
         tmid = self.temp_mid(r)
@@ -142,9 +201,23 @@ class Disk:
         return ttmid+(ttatm-ttmid)*np.sin((np.pi*zz)/(2*zz0))**(2*self.params.sigma_t)
 	
     def verticaldensity_gauss(self, r):
-        """ G)
-        Gas number density. Unit: cm-3. ISOTHERMAL ONLY.
-        WARNING: We divide here by mass to have the number density instead of mass density.
+        """Compute the gas number density assuming a Gaussian vertical profile.
+
+        Parameters
+        ----------
+        r : array_like
+            Radial distances from the star in AU.
+
+        Returns
+        -------
+        ndarray
+            Gas number density in cm^-3.
+
+        Notes
+        -----
+        Valid only for vertically isothermal disks. The surface density is
+        divided by the mean molecular mass to yield number density rather
+        than mass density.
         """
         sigma = self.surfacedensity()
         sigma[(r >= self.params.rout) ^ (r <= self.params.rin)] = 0e0
@@ -155,14 +228,29 @@ class Disk:
 
 
     def density(self, x1, x2, x3=None):
-        """ H)
-        Return the gas density. Unit: g/cm^3. The density is computed assumging hydrostatic equilibrium.
+        """Compute the gas mass density assuming hydrostatic equilibrium.
+
+        Parameters
+        ----------
+        x1 : array_like
+            Radial coordinate in AU (spherical: radii; nautilus: radii).
+        x2 : array_like
+            Second coordinate (spherical: colatitude in rad; nautilus:
+            normalized altitudes in units of scale height).
+        x3 : array_like, optional
+            Third coordinate (spherical: azimuthal angle in rad). Required
+            for spherical grids.
+
+        Returns
+        -------
+        rhog : ndarray
+            Gas mass density in g/cm^3.
 
         Notes
         -----
-        The Gaussian vertical profile is an isothermal approximation. For a non-vertically isothermal 
-        profile, the density can be computed iteratively. The profile slightly deviates from a Gaussian profile.
-        This is done for cartesian coordinates only for now, will be done for spherical structure in a future update. 
+        The Gaussian vertical profile is an isothermal approximation. For a
+        non-vertically isothermal profile, the density can be computed
+        iteratively and slightly deviates from a Gaussian profile.
         """
         if self.params.coordsystem == "spherical":
             rhog = np.ones((len(x1), len(x2), len(x3)))
@@ -197,23 +285,52 @@ class Disk:
         return rhog
         
     def numberdensity(self, x1, x2, x3=None):
-        """ I)
-        Return the gas number density. Unit: cm^-3. The density is computed assumging hydrostatic equilibrium.
+        """Compute the gas number density assuming hydrostatic equilibrium.
+
+        Parameters
+        ----------
+        x1 : array_like
+            Radial coordinate in AU.
+        x2 : array_like
+            Second coordinate (colatitude in rad or normalized altitude).
+        x3 : array_like, optional
+            Azimuthal angle in rad (spherical grids only).
+
+        Returns
+        -------
+        ng : ndarray
+            Gas number density in cm^-3.
 
         Notes
         -----
-        If vertically isothermal, the profile is Gaussian. If not, the density can be computed iteratively and the profile is not Gaussian.
+        If vertically isothermal, the profile is Gaussian. Otherwise the
+        density is computed iteratively and deviates from a Gaussian.
         """
         ng = self.density(x1, x2, x3)/(mu*amu)            
         return ng
 
     def viscous_accretion_heating(self, x1, x2, x3=None):
-        """ I)
-        Return the viscous accretion heating. Unit: erg.cm^-3.s-1. The density is computed assumging hydrostatic equilibrium.
+        """Compute the viscous accretion heating rate.
+
+        Parameters
+        ----------
+        x1 : array_like
+            Radial coordinate in AU.
+        x2 : array_like
+            Colatitude in rad.
+        x3 : array_like, optional
+            Azimuthal angle in rad.
+
+        Returns
+        -------
+        q_visc : ndarray
+            Volumetric viscous heating rate in erg/(cm^3 s).
 
         Notes
         -----
-        If vertically isothermal, the profile is Gaussian. If not, the density can be computed iteratively and the profile is not Gaussian.
+        Currently implemented for spherical coordinates only. The heating is
+        distributed vertically as a Gaussian and truncated beyond
+        ``lim_h`` scale heights.
         """
         if self.params.coordsystem == "spherical":
             yrtosec = 31536000 # number of second in a year. 
@@ -234,20 +351,21 @@ class Disk:
 
         
 
-    """
-    The following methods give the physical quantities related to the grains in the disk.
-    Equation references are those of the documentation.
-    Instance methods:
-	    A) surfacedensity_d(self, r)
-        B) scaleheight_d(self, r)
-        C) density_d(self, z)
-        D) numberdensity_d(self, r)
-        E) Qext(self)
-        F) av_z(self, lam, nd, r, z)
-    """
     def surfacedensity_d(self, r):
-        """ A)
-        Return dust surface density (g.cm-2)
+        """Compute the dust surface density per grain-size bin.
+
+        Parameters
+        ----------
+        r : float or array_like
+            Distance(s) from the star in AU.
+
+        Returns
+        -------
+        sigmad : ndarray
+            Dust surface density for each grain-size bin in g/cm^2, shape
+            ``(n_sizes, *r.shape)``.
+        sig_single : float or ndarray
+            Total (summed over sizes) dust surface density in g/cm^2.
         """
         if self.params.sigma_compute == 'model':
             sigmad = []
@@ -289,13 +407,27 @@ class Disk:
             return sigmad, sig_single
 
     def scaleheight_d(self, r):
-        """ B)
-	    Return Dust scale height H_d(r, a) dependent on the grain sizes and radii. 
+        """Compute the dust scale height for each grain size.
 
-        Notes:
+        Parameters
+        ----------
+        r : array_like
+            Radial distances from the star in AU.
+
+        Returns
+        -------
+        hd : ndarray
+            Dust scale height for each grain size in cm, shape
+            ``(n_sizes, *r.shape)``.
+        hd_single : float or ndarray
+            Dust scale height for the single representative grain in cm.
+
+        Notes
         -----
-        2D array (len(r), len(nb_sizes)). Units: [au]
-	    """	
+        When settling is enabled, the dust scale height is reduced relative
+        to the gas scale height based on the Stokes number, the Schmidt
+        number, and the turbulent alpha parameter.
+        """
         hd = []
         hg = self.scaleheight(r)
         sizes = self.dust.sizes() #grain size in microns
@@ -316,13 +448,23 @@ class Disk:
             return np.array(hd), hg
             
     def density_d(self, x1, x2, x3=None):
-        """ C)
-	    Return dust density rho_d(r, z, a) or rho_d(r, theta, phi, a). 
+        """Compute the dust mass density for each grain-size bin.
 
-        Notes:
-        -----
-        3D array (len(r), len(nb_sizes), len(z)). Units: [g.cm-3]
-	    """	
+        Parameters
+        ----------
+        x1 : array_like
+            Radial coordinate in AU.
+        x2 : array_like
+            Second coordinate (colatitude in rad or normalized altitude).
+        x3 : array_like, optional
+            Azimuthal angle in rad (spherical grids only).
+
+        Returns
+        -------
+        rhod : ndarray
+            Dust mass density in g/cm^3, shape
+            ``(n_sizes, len(x1), len(x2)[, len(x3)])``.
+        """
         rhod = []
         rhod_single = []
         if self.params.coordsystem =='spherical':
@@ -357,16 +499,30 @@ class Disk:
         return rhod
 
     def numberdensity_d(self, x1, x2, x3=None):
-        """ D)
-	    Return dust number density n_d(r, z, a). Depends on the grain sizes, radii, and altitude. 
+        """Compute the dust number density for each grain-size bin.
 
-        Notes:
-        -----
-        3D array (len(nb_sizes), len(r), len(z)). Units: [cm-3]
-        Example:
-        ------- 
-            - call n_d[1, 2, :] for densities at third radius and for second grain species.
-	    """	
+        Parameters
+        ----------
+        x1 : array_like
+            Radial coordinate in AU.
+        x2 : array_like
+            Second coordinate (colatitude in rad or normalized altitude).
+        x3 : array_like, optional
+            Azimuthal angle in rad (spherical grids only).
+
+        Returns
+        -------
+        dens : ndarray
+            Dust number density in cm^-3, shape
+            ``(n_sizes, len(x1), len(x2)[, len(x3)])``.
+
+        Examples
+        --------
+        Access densities at the third radius for the second grain species:
+
+        >>> n_d = disk.numberdensity_d(x1, x2, x3)
+        >>> n_d[1, 2, :]
+        """
         mass = self.dust.grainmass()
         dens = self.density_d(x1, x2, x3)
 
@@ -376,15 +532,29 @@ class Disk:
         return dens
 
     def numberdensity_d_single(self, x1, x2, x3=None):
-        """ D)
-	    Return dust number density n_d(r, z) in case of single grain for chemistry. Usefull if radmc3d uses multiple sizes and nautilus uses a single one. 
+        """Compute the dust number density for a single representative grain.
 
-        Notes:
+        Useful when RADMC-3D uses multiple grain sizes but the chemistry
+        solver (e.g. Nautilus) requires a single grain population.
+
+        Parameters
+        ----------
+        x1 : array_like
+            Radial coordinate in AU.
+        x2 : array_like
+            Second coordinate (colatitude in rad or normalized altitude).
+        x3 : array_like, optional
+            Azimuthal angle in rad (spherical grids only).
+
+        Returns
+        -------
+        dens_single : ndarray
+            Dust number density in cm^-3, shape ``(len(x1), len(x2))``.
+
+        Notes
         -----
-        2D array (len(r), len(z)). Units: [cm-3]. If nb_species = 1, then numberdensity_d_single[r, z] = numberdensity_d[0, r, z]. We use two seperate functions in case nb_species > 1 and the user needs one size for chemistry.
-
-
-	    """	
+        If ``nb_species == 1``, the result equals ``numberdensity_d[0]``.
+        """
         mass_single = self.dust.grainmass_single()
         dens_single = self.rhod_single
 
@@ -394,13 +564,23 @@ class Disk:
 
 
     def q_ext(self, lam, A=2, q_c=4):
-        """ E)
-	    Return extinction efficiency. 
+        """Compute the extinction efficiency for each grain size and wavelength.
 
-        Notes:
-        -----
-        3D array (len(nb_sizes), len(r), len(z)). Units: [cm-3]
-	    """	
+        Parameters
+        ----------
+        lam : array_like
+            Wavelengths in microns.
+        A : float, optional
+            Extinction efficiency in the geometric-optics regime (default 2).
+        q_c : float, optional
+            Extinction efficiency at the critical wavelength (default 4).
+
+        Returns
+        -------
+        qext : ndarray
+            Extinction efficiency, shape ``(n_sizes, len(lam))``.
+            Dimensionless.
+        """
         sizes = self.dust.sizes()
         lambda_c = 2*np.pi*sizes[-1]
 
@@ -416,9 +596,26 @@ class Disk:
         return qext
 
     def av_z(self, lam, nd, r, z):
-        """ F)
-	    Return visual extinction. 
-	    """	       
+        """Compute the vertical visual extinction profile.
+
+        Parameters
+        ----------
+        lam : array_like
+            Wavelengths in microns.
+        nd : ndarray
+            Dust number density array of shape
+            ``(n_sizes, len(r), len(z))`` in cm^-3.
+        r : array_like
+            Radial distances from the star in AU.
+        z : array_like
+            Normalized altitude coordinates (in units of scale height).
+
+        Returns
+        -------
+        avz : ndarray
+            Visual extinction (A_V) of shape ``(len(r), len(z))``,
+            in magnitudes.
+        """
         sizes = self.dust.sizes()
         #extinction efficiency
         lambda_c = 2*np.pi*sizes[-1]
@@ -446,13 +643,17 @@ class Disk:
 
 
     def avz_ism(self, lam, A=2, q_c=4):
-        """ E)
-	    Return visual extinction using the conversion factor of H column density to Av:. 
+        """Compute visual extinction using the ISM H-column-density-to-Av conversion.
 
-        Notes:
-        -----
-        3D array (len(nb_sizes), len(r), len(z)). Units: [cm-3]
-	    """	
+        Parameters
+        ----------
+        lam : array_like
+            Wavelengths in microns.
+        A : float, optional
+            Extinction efficiency in the geometric-optics regime (default 2).
+        q_c : float, optional
+            Extinction efficiency at the critical wavelength (default 4).
+        """
 
     # def av_z2(self ,mass, filelist, ):
     #     #--Av

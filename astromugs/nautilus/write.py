@@ -52,6 +52,123 @@ def parameters(path, resolution, phase=1, \
                output_type = 'log', \
                relative_tolerance=1.000E-04, \
                minimum_initial_abundance=1.000E-40):
+    """Write the Nautilus parameters.in input file.
+
+    Generates a formatted parameter file containing all physical, chemical,
+    and numerical settings required by the Nautilus chemical code for a
+    single-grain simulation.
+
+    Parameters
+    ----------
+    path : str
+        Directory path where the parameters.in file will be written.
+    resolution : int
+        Spatial resolution (number of spatial points). If 1, the model is 0D.
+    phase : int, optional
+        Phase model switch. 0 for 2-phase, 1 for 3-phase.
+    preli : int, optional
+        Preliminary test switch. 0 to skip, 1 to run tests before simulation.
+    temp : int, optional
+        Structure evolution switch. If 1, physical properties evolve with time.
+    grain_temp : str, optional
+        Grain temperature type ('fixed', 'gas', 'table_evolv', 'table_1D',
+        or 'computed').
+    is_dust_1D : int, optional
+        Switch to read grain abundance and NH/AV factor from 1D_static.dat.
+    is_grain_reactions : int, optional
+        Switch for grain surface accretion and reactions.
+    is_h2_adhoc_form : int, optional
+        Switch for ad hoc H2 formation on grain surfaces.
+    is_h2_formation_rate : int, optional
+        Switch for H2 formation rates from Bron et al. (2014).
+    height_h2formation : int, optional
+        Spatial point above which Bron et al. (2014) method is used.
+    is_absorption_h2 : int, optional
+        H2 self-shielding switch (Lee & Herbst 1996).
+    is_absorption_co : int, optional
+        CO self-shielding method. 1 for Lee & Herbst (1996), 2 for Visser
+        et al. (2009).
+    is_absorption_n2 : int, optional
+        N2 self-shielding switch (Li et al. 2013).
+    is_photodesorb : int, optional
+        Photodesorption of ices switch.
+    is_crid : int, optional
+        Cosmic-ray induced diffusion (CRID) switch.
+    is_er_cir : int, optional
+        Eley-Rideal and Complex Induced Reaction switch.
+    tunneling : int, optional
+        Grain tunneling diffusion mode (0=thermal, 1=QM1, 2=QM2, 3=fastest,
+        4=QM2 for O).
+    modify_rate_flag : int, optional
+        Rate modification flag (1=H, 2=H+H2, 3=all, -1=H+H only).
+    conservation_type : int, optional
+        Element conservation type. 0 conserves only electrons.
+    structure : str, optional
+        Structure type ('0D', '1D_diff', or '1D_no_diff').
+    initial_gas_density : float, optional
+        Initial gas number density [cm^-3].
+    initial_gas_temperature : float, optional
+        Initial gas temperature [K].
+    initial_visual_extinction : float, optional
+        Initial visual extinction [mag].
+    cr_ionisation_rate : float, optional
+        Cosmic-ray ionisation rate [s^-1].
+    x_ionisation_rate : float, optional
+        X-ray ionisation rate [s^-1].
+    uv_flux : float, optional
+        UV flux scale factor in units of the reference ISRF flux.
+    initial_dust_temperature : float, optional
+        Initial dust temperature [K].
+    initial_dtg_mass_ratio : float, optional
+        Dust-to-gas mass ratio.
+    sticking_coeff_neutral : float, optional
+        Sticking coefficient for neutral species.
+    sticking_coeff_positive : float, optional
+        Sticking coefficient for positively charged species.
+    sticking_coeff_negative : float, optional
+        Sticking coefficient for negatively charged species.
+    grain_density : float, optional
+        Grain material mass density [g/cm^3].
+    grain_radius : float, optional
+        Grain radius [cm].
+    diff_barrier_thick : float, optional
+        Diffusion barrier thickness [cm].
+    surface_site_density : float, optional
+        Surface site density on a grain [cm^-2].
+    diff_binding_ratio_surf : float, optional
+        Ratio of diffusion barrier to binding energy for surface species.
+    diff_binding_ratio_mant : float, optional
+        Ratio of diffusion barrier to binding energy for mantle species.
+    chemical_barrier_thickness : float, optional
+        Grain reaction activation energy barrier width [cm].
+    cr_peak_grain_temp : float, optional
+        Peak grain temperature from cosmic-ray heating [K].
+    cr_peak_duration : float, optional
+        Duration of peak grain temperature from cosmic-ray heating [s].
+    Fe_ionisation_rate : float, optional
+        Cosmic Fe-ion--grain encounter rate [s^-1 grain^-1].
+    vib_to_dissip_freq_ratio : float, optional
+        Ratio of surface-molecule bond frequency to energy dissipation
+        frequency for the RRK desorption mechanism.
+    ED_H2 : float, optional
+        H2 binding energy over itself [K].
+    start_time : float, optional
+        First output time [yr].
+    stop_time : float, optional
+        Last output time [yr].
+    nb_outputs : int, optional
+        Total number of output time steps.
+    output_type : str, optional
+        Output time spacing ('linear' or 'log').
+    relative_tolerance : float, optional
+        Relative tolerance of the ODE solver.
+    minimum_initial_abundance : float, optional
+        Default minimum initial fractional abundance.
+
+    Notes
+    -----
+    Creates the file ``parameters.in`` in the specified directory.
+    """
 
     f = open(path + 'parameters.in',"w")
 
@@ -207,6 +324,129 @@ def parameters_nmgc(path, resolution, phase=1, \
                output_type = 'log', \
                relative_tolerance=1.000E-04, \
                minimum_initial_abundance=1.000E-40):
+    """Write the Nautilus parameters.in file for multi-grain (NMGC) mode.
+
+    Generates a formatted parameter file for the Nautilus Multi-Grain Code
+    variant, which supports multiple grain size populations and additional
+    switches compared to the standard single-grain version.
+
+    Parameters
+    ----------
+    path : str
+        Directory path where the parameters.in file will be written.
+    resolution : int
+        Spatial resolution (number of spatial points). If 1, the model is 0D.
+    phase : int, optional
+        Phase model switch. 0 for 2-phase, 1 for 3-phase.
+    preli : int, optional
+        Preliminary test switch. 0 to skip, 1 to run tests before simulation.
+    t : int, optional
+        Structure evolution switch. If 1, physical properties evolve with time.
+    grain_temp : str, optional
+        Grain temperature type ('fixed', 'fixed_to_dust_size', 'gas',
+        'table_evolv', 'table_1D', or 'computed').
+    photo_disk : int, optional
+        Switch for photodissociation rate computation for protoplanetary disks.
+    is_grain_reactions : int, optional
+        Switch for grain surface accretion and reactions.
+    is_h2_adhoc_form : int, optional
+        Switch for ad hoc H2 formation on grain surfaces.
+    is_h2_formation_rate : int, optional
+        Switch for H2 formation rates from Bron et al. (2014).
+    height_h2formation : int, optional
+        Spatial point above which Bron et al. (2014) method is used.
+    is_absorption_h2 : int, optional
+        H2 self-shielding switch (Lee & Herbst 1996).
+    is_absorption_co : int, optional
+        CO self-shielding method. 1 for Lee & Herbst (1996), 2 for Visser
+        et al. (2009).
+    is_absorption_n2 : int, optional
+        N2 self-shielding switch (Li et al. 2013).
+    is_photodesorb : int, optional
+        Photodesorption of ices switch.
+    is_crid : int, optional
+        Cosmic-ray induced diffusion (CRID) switch.
+    is_er_cir : int, optional
+        Eley-Rideal and Complex Induced Reaction switch.
+    tunneling : int, optional
+        Grain tunneling diffusion mode (0=thermal, 1=QM1, 2=QM2, 3=fastest,
+        4=QM2 for O, 5=QM2 for all).
+    modify_rate_flag : int, optional
+        Rate modification flag (1=H, 2=H+H2, 3=all, -1=H+H only).
+    conservation_type : int, optional
+        Element conservation type. 0 conserves only electrons.
+    distrib : int, optional
+        Grain size distribution flag.
+    nb_active_lay : float, optional
+        Number of chemically active surface layers.
+    structure : str, optional
+        Structure type ('0D', '1D_diff', or '1D_no_diff').
+    multi_grain : int, optional
+        Multi-grain mode switch. 1 for multi-grain, 0 for single-grain.
+    initial_gas_density : float, optional
+        Initial gas number density [cm^-3].
+    initial_gas_temperature : float, optional
+        Initial gas temperature [K].
+    initial_visual_extinction : float, optional
+        Initial visual extinction [mag].
+    cr_ionisation_rate : float, optional
+        Cosmic-ray ionisation rate [s^-1].
+    x_ionisation_rate : float, optional
+        X-ray ionisation rate [s^-1].
+    uv_flux : float, optional
+        UV flux scale factor in units of the reference ISRF flux.
+    initial_dust_temperature : float, optional
+        Initial dust temperature [K].
+    initial_dtg_mass_ratio : float, optional
+        Dust-to-gas mass ratio.
+    sticking_coeff_neutral : float, optional
+        Sticking coefficient for neutral species.
+    sticking_coeff_positive : float, optional
+        Sticking coefficient for positively charged species.
+    sticking_coeff_negative : float, optional
+        Sticking coefficient for negatively charged species.
+    grain_density : float, optional
+        Grain material mass density [g/cm^3].
+    grain_radius : float, optional
+        Grain radius [cm].
+    diff_barrier_thick : float, optional
+        Diffusion barrier thickness [cm].
+    surface_site_density : float, optional
+        Surface site density on a grain [cm^-2].
+    diff_binding_ratio_surf : float, optional
+        Ratio of diffusion barrier to binding energy for surface species.
+    diff_binding_ratio_mant : float, optional
+        Ratio of diffusion barrier to binding energy for mantle species.
+    chemical_barrier_thickness : float, optional
+        Grain reaction activation energy barrier width [cm].
+    cr_peak_grain_temp : float, optional
+        Peak grain temperature from cosmic-ray heating [K].
+    cr_peak_duration : float, optional
+        Duration of peak grain temperature from cosmic-ray heating [s].
+    Fe_ionisation_rate : float, optional
+        Cosmic Fe-ion--grain encounter rate [s^-1 grain^-1].
+    vib_to_dissip_freq_ratio : float, optional
+        Ratio of surface-molecule bond frequency to energy dissipation
+        frequency for the RRK desorption mechanism.
+    ED_H2 : float, optional
+        H2 binding energy over itself [K].
+    start_time : float, optional
+        First output time [yr].
+    stop_time : float, optional
+        Last output time [yr].
+    nb_outputs : int, optional
+        Total number of output time steps.
+    output_type : str, optional
+        Output time spacing ('linear' or 'log').
+    relative_tolerance : float, optional
+        Relative tolerance of the ODE solver.
+    minimum_initial_abundance : float, optional
+        Default minimum initial fractional abundance.
+
+    Notes
+    -----
+    Creates the file ``parameters.in`` in the specified directory.
+    """
 
     f = open(path + 'parameters.in',"w")
 
@@ -325,6 +565,40 @@ def parameters_nmgc(path, resolution, phase=1, \
     f.close()
 
 def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, dtogas=1e-2, rho_m=2.5):
+    """Write the multi-grain size input files for Nautilus.
+
+    Generates the ``1D_grain_sizes.in`` file containing grain radii, inverse
+    abundances, dust temperatures, and CR peak temperatures for each grain
+    size bin and spatial point. Also writes a ``temperatures.dat`` file with
+    dust temperatures only.
+
+    Parameters
+    ----------
+    path : str
+        Directory path where the output files will be written.
+    sizes : array_like
+        Grain size array. The last element ``sizes[-1]`` contains the grain
+        radii in microns.
+    gas_density : array_like
+        Gas number density at each spatial point [cm^-3].
+    dust_density : array_like
+        Dust number density for each grain size and spatial point [cm^-3],
+        with shape (n_sizes, n_z).
+    T_dust : array_like
+        Dust temperature for each grain size and spatial point [K], with
+        shape (n_sizes, n_z).
+    min_gas_density : float, optional
+        Floor value for gas density [cm^-3].
+    dtogas : float, optional
+        Dust-to-gas mass ratio.
+    rho_m : float, optional
+        Grain material bulk density [g/cm^3].
+
+    Notes
+    -----
+    Creates ``1D_grain_sizes.in`` and ``temperatures.dat`` in the specified
+    directory.
+    """
     nb_grains = len(sizes[-1])
     f = open(path + '1D_grain_sizes.in',"w")
     f.write('! grain-radius [cm] 1/abundance  grain-temp CR-peak-Temperaturegrain[K] spatial-point\n')
@@ -357,20 +631,60 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
     f.close()
 
 def uv_factordisk(UV_ref, ref_radius, radius, Hg):
+    """Compute the UV scaling factor for a disk geometry.
+
+    Calculates the UV flux dilution factor based on the radial and vertical
+    distance from the star, relative to a reference radius.
+
+    Parameters
+    ----------
+    UV_ref : float
+        Reference UV flux at the reference radius.
+    ref_radius : float
+        Reference radius [AU].
+    radius : float or array_like
+        Radial distance from the star [AU].
+    Hg : float or array_like
+        Scale height or vertical distance [AU].
+
+    Returns
+    -------
+    float or ndarray
+        UV scaling factor at the given position.
+    """
     uvfact = UV_ref/(2*((radius/ref_radius)**2 + ((4*Hg)/(ref_radius))**2))
     return uvfact
 
 def uv_factor(isrf, lam_mono, R_star, T_star, rchem, zchem, external):
-    """
-    Define the uv_factor from the stellar spectrum (Assuming BB for now). 
+    """Compute the UV scaling factor from the stellar spectrum.
 
-    Args:
-        isrf: 
-        lam_mono: the wavelengths in the mcmono_wavelength file
-        external: possible external heating source (heating from accretion, etc.) 
+    Integrates the stellar blackbody spectrum and the interstellar radiation
+    field (ISRF) over the UV wavelength range and computes the UV flux
+    relative to the ISRF, diluted by the distance from the star.
 
+    Parameters
+    ----------
+    isrf : object
+        ISRF object with a ``create_isrf`` method that returns the ISRF
+        spectrum.
+    lam_mono : ndarray
+        Monochromatic wavelengths from the wavelength file [micron].
+    R_star : float
+        Stellar radius [cm].
+    T_star : float
+        Stellar effective temperature [K].
+    rchem : float or ndarray
+        Radial distance of the chemical point from the star [cm].
+    zchem : float or ndarray
+        Vertical distance of the chemical point from the midplane [cm].
+    external : array_like
+        External radiation source contribution (e.g., accretion heating).
 
-    comments:
+    Returns
+    -------
+    float or ndarray
+        UV scaling factor in units of the ISRF, including geometric
+        dilution and a +1 offset for the ambient ISRF contribution.
     """
     #get only the UV range from the mcmono_wavelength file.
     lamuv = np.where((lam_mono <= 0.2)) # extract the ~ uv
@@ -404,6 +718,27 @@ def uv_factor(isrf, lam_mono, R_star, T_star, rchem, zchem, external):
     return uvfact
 
 def avnh_factor(nH_to_AV_conversion, dtogas, rgrain, nbz): # rgrain provided in micron
+    """Compute the AV-to-NH conversion factor array.
+
+    Scales the standard AV/NH conversion factor by the dust-to-gas ratio
+    and grain radius relative to their canonical values.
+
+    Parameters
+    ----------
+    nH_to_AV_conversion : float
+        Reference NH-to-AV conversion factor [cm^-2 mag^-1].
+    dtogas : float
+        Dust-to-gas mass ratio.
+    rgrain : float
+        Grain radius [micron].
+    nbz : int
+        Number of spatial points along the vertical axis.
+
+    Returns
+    -------
+    ndarray
+        AV/NH conversion factor at each spatial point [mag cm^2].
+    """
     av_nh = (1/nH_to_AV_conversion)*(dtogas/1e-2)*(1e-5/(rgrain*1e-4))*np.ones(nbz)
     return av_nh
 
@@ -420,6 +755,49 @@ def static(path, dist, gas_density,
            max_uv=None,
            dtogas=1e-2,
            rho_m=2.5):
+    """Write the 1D static structure file for Nautilus.
+
+    Generates the ``1D_static.dat`` file containing the vertical physical
+    structure of the disk or cloud, including gas density, temperatures,
+    visual extinction, grain properties, and UV flux at each spatial point.
+
+    Parameters
+    ----------
+    path : str
+        Directory path where 1D_static.dat will be written.
+    dist : array_like
+        Vertical distance coordinates [AU].
+    gas_density : array_like
+        Gas number density at each spatial point [cm^-3].
+    T_gas : array_like
+        Gas temperature at each spatial point [K].
+    av_z : array_like
+        Visual extinction at each spatial point [mag].
+    T_dust : array_like
+        Dust temperature at each spatial point [K].
+    dust_density : array_like
+        Dust number density at each spatial point [cm^-3].
+    r_grain : float
+        Grain radius [micron].
+    avnh_fact : array_like
+        AV/NH conversion factor at each spatial point.
+    uvfactor : array_like
+        UV flux scaling factor at each spatial point.
+    min_gas_density : float, optional
+        Floor value for gas density [cm^-3].
+    min_av : float, optional
+        Floor value for visual extinction [mag].
+    max_uv : float or None, optional
+        Maximum allowed UV factor. If None, no cap is applied.
+    dtogas : float, optional
+        Dust-to-gas mass ratio.
+    rho_m : float, optional
+        Grain material bulk density [g/cm^3].
+
+    Notes
+    -----
+    Creates ``1D_static.dat`` in the specified directory.
+    """
     distance = dist
     nh = np.maximum(gas_density, min_gas_density)
     grain_mass = (4./3.) * np.pi * rho_m * (r_grain*1e-4)**3
@@ -446,6 +824,22 @@ def static(path, dist, gas_density,
     np.savetxt(path+'1D_static.dat', static_array, fmt='%.5E', delimiter='   ', newline='\n', header=header_static , comments='! ', encoding=None)
 
 def network(path):
+    """Copy the chemical network files to the simulation directory.
+
+    Copies gas and grain species lists, reaction networks, activation
+    energies, and surface parameters from the default network directory.
+
+    Parameters
+    ----------
+    path : str
+        Destination directory path for the network files.
+
+    Notes
+    -----
+    Copies the following files into ``path``: ``gas_species.in``,
+    ``grain_species.in``, ``gas_reactions.in``, ``grain_reactions.in``,
+    ``activation_energies.in``, and ``surface_parameters.in``.
+    """
     copy("astromugs/nautilus/network/gas_species.in", path + "gas_species.in")
     copy("astromugs/nautilus/network/grain_species.in", path + "grain_species.in")
     copy("astromugs/nautilus/network/gas_reactions.in", path + "gas_reactions.in")
@@ -454,6 +848,21 @@ def network(path):
     copy("astromugs/nautilus/network/surface_parameters.in", path + "surface_parameters.in")
 
 def elements(path):
+    """Write the element list input file for Nautilus.
+
+    Creates ``element.in`` containing the names and atomic masses (in AMU)
+    of the chemical elements included in the network: H, He, C, N, O, Si,
+    S, Fe, Na, Mg, Cl, P, and F.
+
+    Parameters
+    ----------
+    path : str
+        Directory path where element.in will be written.
+
+    Notes
+    -----
+    Creates ``element.in`` in the specified directory.
+    """
     f = open(path + 'element.in',"w")
     f.write("! Species name ; mass (AMU)\n")
     f.write("H            1.000\n")
@@ -473,9 +882,25 @@ def elements(path):
 
 
 def abundances(path, ab):
-    '''
-    ATOMIC INITIAL ABUNDANCES OR OTHERS FROM INPUT FILES
-    '''
+    """Write or copy the initial chemical abundances file for Nautilus.
+
+    If ``ab`` is ``'atomic'``, writes a default set of atomic initial
+    abundances (relative to hydrogen) to ``abundances.in``. Otherwise,
+    copies the file at the path given by ``ab`` into the simulation
+    directory as ``abundances.in``.
+
+    Parameters
+    ----------
+    path : str
+        Directory path where abundances.in will be written.
+    ab : str
+        Either ``'atomic'`` to use default atomic abundances, or a file
+        path to an existing abundances file to copy.
+
+    Notes
+    -----
+    Creates ``abundances.in`` in the specified directory.
+    """
     if ab == 'atomic':
         f = open(path + 'abundances.in',"w")
         f.write("! Abundances in relative abundances with respect to Hydrogen\n")
@@ -1087,4 +1512,14 @@ def abundances(path, ab):
 #     f.close()
 
 def evolution(path):
+    """Write the structure evolution file for Nautilus.
+
+    Placeholder function for writing time-dependent physical structure
+    evolution data. Currently not implemented.
+
+    Parameters
+    ----------
+    path : str
+        Directory path where the evolution file would be written.
+    """
     pass

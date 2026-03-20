@@ -3,13 +3,58 @@ from scipy.interpolate import RegularGridInterpolator
 from ..constants.constants import c, autocm, amu, mu, black_body
 
 def moving_average(x, w):
+    """Compute a moving average using a uniform convolution kernel.
+
+    Parameters
+    ----------
+    x : array_like
+        Input array to smooth.
+    w : int
+        Width of the rolling window (number of points).
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed array with the same length as `x`.
+    """
     return np.convolve(x, np.ones(w), 'same') / w
 
 def dust_density(dtogas, rho_m, sizes, dens_radmc3d, rchem, zchem, d, theta):
-    """Interpolate RADMC3D dust density (spherical) onto the Nautilus chemistry grid (cylindrical).
+    """Interpolate RADMC3D dust density onto the Nautilus chemistry grid.
 
-    Uses bilinear interpolation on the (r_sph, theta) grid instead of nearest-neighbor,
-    preserving radial drift gradients and smooth disk boundaries.
+    Converts dust mass densities from the RADMC3D spherical grid to the
+    Nautilus cylindrical grid using bilinear interpolation, preserving
+    radial drift gradients and smooth disk boundaries. Returns both dust
+    number densities per grain size and gas number density.
+
+    Parameters
+    ----------
+    dtogas : float
+        Dust-to-gas mass ratio.
+    rho_m : float
+        Material (intrinsic) density of dust grains, in g/cm^3.
+    sizes : array_like
+        Array of grain radii for each dust species, in cm.
+    dens_radmc3d : numpy.ndarray
+        Dust mass density from RADMC3D with shape
+        ``(nbspecies, nphi, ntheta, nr)``, in g/cm^3.
+    rchem : numpy.ndarray
+        Radial grid of the Nautilus chemistry model, in cm.
+    zchem : numpy.ndarray
+        Vertical grid of the Nautilus chemistry model with shape
+        ``(nrchem, nzchem)``, in cm. Values can differ per radius.
+    d : numpy.ndarray
+        Radial (spherical) distance grid of the RADMC3D model, in AU.
+    theta : numpy.ndarray
+        Co-latitude grid of the RADMC3D model, in radians.
+
+    Returns
+    -------
+    dens_naut_nd : numpy.ndarray
+        Dust number density per grain size, shape
+        ``(nbspecies, nrchem, nzchem)``, in cm^-3.
+    dens_naut_nH : numpy.ndarray
+        Gas hydrogen number density, shape ``(nrchem, nzchem)``, in cm^-3.
     """
     nbspecies, nz, ny, nx = dens_radmc3d.shape
     nrchem = len(rchem)
@@ -55,6 +100,35 @@ def dust_density(dtogas, rho_m, sizes, dens_radmc3d, rchem, zchem, d, theta):
 
 
 def dust_temperature_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
+    """Remap multi-species RADMC3D dust temperatures onto the Nautilus grid using scale heights.
+
+    Converts temperatures from the RADMC3D spherical grid to the Nautilus
+    cylindrical grid via nearest-neighbor lookup, then smooths vertical
+    profiles with a 5-point moving average.
+
+    Parameters
+    ----------
+    temp_radmc3d : numpy.ndarray
+        Dust temperature from RADMC3D with shape
+        ``(nbspecies, nphi, ntheta, nr)``, in K.
+    rchem : numpy.ndarray
+        Radial grid of the Nautilus chemistry model, in cm.
+    zchem : numpy.ndarray
+        Normalised vertical grid points (dimensionless, scaled by `hg`).
+    d : numpy.ndarray
+        Radial (spherical) distance grid of the RADMC3D model, in AU.
+    theta : numpy.ndarray
+        Co-latitude grid of the RADMC3D model, in radians.
+    hg : array_like, optional
+        Gas scale height at each radial point, in cm. Used to convert
+        normalised `zchem` to physical heights.
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed dust temperature on the Nautilus grid with shape
+        ``(nbspecies, nrchem, nzchem)``, in K.
+    """
     nbspecies, nz, ny, nx = temp_radmc3d.shape
 
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
@@ -83,6 +157,35 @@ def dust_temperature_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
     return temp_naut_smooth 
 
 def dust_temperature_single_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
+    """Remap single-species RADMC3D dust temperature onto the Nautilus grid using scale heights.
+
+    Same as `dust_temperature_disk` but for a single dust species (no
+    species dimension). Uses nearest-neighbor lookup followed by 5-point
+    moving-average smoothing of vertical profiles.
+
+    Parameters
+    ----------
+    temp_radmc3d : numpy.ndarray
+        Dust temperature from RADMC3D with shape
+        ``(nphi, ntheta, nr)``, in K.
+    rchem : numpy.ndarray
+        Radial grid of the Nautilus chemistry model, in cm.
+    zchem : numpy.ndarray
+        Normalised vertical grid points (dimensionless, scaled by `hg`).
+    d : numpy.ndarray
+        Radial (spherical) distance grid of the RADMC3D model, in AU.
+    theta : numpy.ndarray
+        Co-latitude grid of the RADMC3D model, in radians.
+    hg : array_like, optional
+        Gas scale height at each radial point, in cm. Used to convert
+        normalised `zchem` to physical heights.
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed dust temperature on the Nautilus grid with shape
+        ``(nrchem, nzchem)``, in K.
+    """
     nz, ny, nx = temp_radmc3d.shape
 
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
@@ -110,6 +213,34 @@ def dust_temperature_single_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
 
 
 def dust_temperature(temp_radmc3d, rchem, zchem, d, theta):
+    """Remap multi-species RADMC3D dust temperatures onto the Nautilus grid.
+
+    Converts temperatures from the RADMC3D spherical grid to the Nautilus
+    cylindrical grid via nearest-neighbor lookup, where `zchem` provides
+    physical heights per radius. Vertical profiles are smoothed with a
+    5-point moving average.
+
+    Parameters
+    ----------
+    temp_radmc3d : numpy.ndarray
+        Dust temperature from RADMC3D with shape
+        ``(nbspecies, nphi, ntheta, nr)``, in K.
+    rchem : numpy.ndarray
+        Radial grid of the Nautilus chemistry model, in cm.
+    zchem : numpy.ndarray
+        Vertical grid with shape ``(nrchem, nzchem)``, in cm.
+        Heights can differ per radial point.
+    d : numpy.ndarray
+        Radial (spherical) distance grid of the RADMC3D model, in AU.
+    theta : numpy.ndarray
+        Co-latitude grid of the RADMC3D model, in radians.
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed dust temperature on the Nautilus grid with shape
+        ``(nbspecies, nrchem, nzchem)``, in K.
+    """
     nbspecies, nz, ny, nx = temp_radmc3d.shape
 
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
@@ -152,6 +283,33 @@ def dust_temperature(temp_radmc3d, rchem, zchem, d, theta):
     return temp_naut_smooth 
 
 def dust_temperature_single(temp_radmc3d, rchem, zchem, d, theta):
+    """Remap single-species RADMC3D dust temperature onto the Nautilus grid.
+
+    Same as `dust_temperature` but for a single dust species (no species
+    dimension). Uses nearest-neighbor lookup followed by 5-point
+    moving-average smoothing of vertical profiles.
+
+    Parameters
+    ----------
+    temp_radmc3d : numpy.ndarray
+        Dust temperature from RADMC3D with shape
+        ``(nphi, ntheta, nr)``, in K.
+    rchem : numpy.ndarray
+        Radial grid of the Nautilus chemistry model, in cm.
+    zchem : numpy.ndarray
+        Vertical grid with shape ``(nrchem, nzchem)``, in cm.
+        Heights can differ per radial point.
+    d : numpy.ndarray
+        Radial (spherical) distance grid of the RADMC3D model, in AU.
+    theta : numpy.ndarray
+        Co-latitude grid of the RADMC3D model, in radians.
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed dust temperature on the Nautilus grid with shape
+        ``(nrchem, nzchem)``, in K.
+    """
     nz, ny, nx = temp_radmc3d.shape
 
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
@@ -192,9 +350,45 @@ def dust_temperature_single(temp_radmc3d, rchem, zchem, d, theta):
 
 
 def local_field():
+    """Compute the local radiation field (placeholder, not yet implemented)."""
     pass
 
 def avz_disk(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta, hg):
+    """Compute the vertical visual extinction map using scale-height-based vertical coordinates.
+
+    Integrates the RADMC3D radiation field over UV wavelengths, remaps it
+    onto the Nautilus cylindrical grid (with heights derived from gas scale
+    heights), and computes Av by comparing the attenuated field to an
+    unattenuated blackbody reference.
+
+    Parameters
+    ----------
+    field_radmc3d : numpy.ndarray
+        Monochromatic mean intensity from RADMC3D with shape
+        ``(nlam, nphi, ntheta, nr)``, in cgs units.
+    lam_mono : numpy.ndarray
+        Wavelength grid of the radiation field, in microns.
+    R_star : float
+        Stellar radius, in cm.
+    T_star : float
+        Stellar effective temperature, in K.
+    rchem : numpy.ndarray
+        Radial grid of the Nautilus chemistry model, in cm.
+    zchem : numpy.ndarray
+        Normalised vertical grid points (dimensionless, scaled by `hg`).
+    d : numpy.ndarray
+        Radial (spherical) distance grid of the RADMC3D model, in AU.
+    theta : numpy.ndarray
+        Co-latitude grid of the RADMC3D model, in radians.
+    hg : array_like
+        Gas scale height at each radial point, in cm.
+
+    Returns
+    -------
+    numpy.ndarray
+        Visual extinction Av on the Nautilus grid with shape
+        ``(nrchem, nzchem)``, in magnitudes.
+    """
     nlam, nph, nt, nr = field_radmc3d.shape
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
     lamuv = np.where((lam_mono <= 0.2)) # extract the ~ uv
@@ -250,6 +444,41 @@ def avz_disk(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta, hg
 
 
 def av_z(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta):
+    """Compute the vertical visual extinction map using physical vertical coordinates.
+
+    Integrates the RADMC3D radiation field over UV wavelengths, remaps it
+    onto the Nautilus cylindrical grid (where `zchem` contains physical
+    heights per radius), and derives Av by comparing the attenuated field
+    to an unattenuated blackbody reference. Both vertical and radial
+    profiles are smoothed with a 5-point moving average.
+
+    Parameters
+    ----------
+    field_radmc3d : numpy.ndarray
+        Monochromatic mean intensity from RADMC3D with shape
+        ``(nlam, nphi, ntheta, nr)``, in cgs units.
+    lam_mono : numpy.ndarray
+        Wavelength grid of the radiation field, in microns.
+    R_star : float
+        Stellar radius, in cm.
+    T_star : float
+        Stellar effective temperature, in K.
+    rchem : numpy.ndarray
+        Radial grid of the Nautilus chemistry model, in cm.
+    zchem : numpy.ndarray
+        Vertical grid with shape ``(nrchem, nzchem)``, in cm.
+        Heights can differ per radial point.
+    d : numpy.ndarray
+        Radial (spherical) distance grid of the RADMC3D model, in AU.
+    theta : numpy.ndarray
+        Co-latitude grid of the RADMC3D model, in radians.
+
+    Returns
+    -------
+    numpy.ndarray
+        Smoothed visual extinction Av on the Nautilus grid with shape
+        ``(nrchem, nzchem)``, in magnitudes.
+    """
     nlam, nph, nt, nr = field_radmc3d.shape
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
     lamuv = np.where((lam_mono <= 0.2)) # extract the ~ uv
@@ -325,8 +554,37 @@ def av_z(field_radmc3d, lam_mono, R_star, T_star, rchem, zchem, d, theta):
     return avz_smooth
 
 
-def to_spherical(chemmodel, nr, nt, dist, theta, struct='numberdens_species'): 
-    #self.grid.chemmodel[species], nx, ny, x, y
+def to_spherical(chemmodel, nr, nt, dist, theta, struct='numberdens_species'):
+    """Convert a Nautilus chemistry structure from cylindrical to spherical coordinates.
+
+    Maps a quantity stored on the Nautilus cylindrical grid (keyed by
+    radial position) onto a regular spherical ``(r, theta)`` grid via
+    nearest-neighbor lookup. Points above the disk surface or inside the
+    inner radius receive floor values.
+
+    Parameters
+    ----------
+    chemmodel : dict
+        Dictionary keyed by cylindrical radius (cm). Each entry is a dict
+        containing ``'z'`` (vertical grid in cm) and the field given by
+        `struct` (e.g., ``'numberdens_species'``).
+    nr : int
+        Number of radial points in the output spherical grid.
+    nt : int
+        Number of co-latitude points in the output spherical grid.
+    dist : numpy.ndarray
+        Spherical radial distance grid, in cm.
+    theta : numpy.ndarray
+        Co-latitude grid, in radians.
+    struct : str, optional
+        Key in `chemmodel` entries for the quantity to remap.
+        Default is ``'numberdens_species'``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Remapped quantity on the spherical grid with shape ``(nr, nt)``.
+    """
     spherical_struct = np.zeros((nr, nt))
     r_naut = np.array(list(chemmodel.keys()))
     rcut = r_naut[0]

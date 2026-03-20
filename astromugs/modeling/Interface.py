@@ -17,18 +17,45 @@ from astromugs.constants.constants import autocm, M_sun, R_sun, L_sun
 
 
 class Interface(Model):
+    """High-level interface for assembling radiative transfer models.
+
+    Provides methods to add physical components (star, disk, envelope,
+    interstellar radiation field) and chemical models to a grid, building
+    on the base ``Model`` class.
+    """
+
     #def __init__(self):
         #self.params = StructureParams()
         #self.envelope_params = self.params.envelope
         #self.disk_params = self.params.disk
 
     def add_chemical_path(self, chemicalpath):
+        """Set the path to the chemical data directory.
+
+        Parameters
+        ----------
+        chemicalpath : str
+            Path to the directory containing chemical model files.
+        """
         self.chempath = chemicalpath
 
     def add_thermal_path(self, thermalpath):
+        """Set the path to the thermal dust opacity data directory.
+
+        Parameters
+        ----------
+        thermalpath : str
+            Path to the directory containing thermal dust opacity files.
+        """
         self.thermalpath = thermalpath
 
     def add_star(self):
+        """Add a central star to the grid using thermal parameters.
+
+        Reads mass, luminosity, temperature, and position from
+        ``self.thermalparams.star`` and creates a ``Star`` instance on
+        the grid.
+        """
         mass = self.thermalparams.star.mass
         luminosity = self.thermalparams.star.luminosity
         temperature = self.thermalparams.star.temperature
@@ -39,10 +66,34 @@ class Interface(Model):
                 temperature=temperature, x=x, y=y, z=z))
 
     def add_isrf(self, cut=2.e-1, d78=True, vdb82=True):
+        """Add an interstellar radiation field (ISRF) to the grid.
+
+        Parameters
+        ----------
+        cut : float, optional
+            Short-wavelength cutoff for the ISRF, in microns. Default is
+            0.2 microns.
+        d78 : bool, optional
+            Include the Draine (1978) UV component. Default is True.
+        vdb82 : bool, optional
+            Include the van Dishoeck & Black (1982) component. Default
+            is True.
+        """
         self.isrf = InterstellarRadFields(cut, d78, vdb82)
         self.grid.add_isrf(self.isrf.create_isrf(self.grid.lam))
 
-    def add_disk(self,  dust=None, **kwargs):
+    def add_disk(self, dust=None, **kwargs):
+        """Add a disk component and its dust density to the grid.
+
+        Parameters
+        ----------
+        dust : object or None, optional
+            Dust opacity model. If it has a ``path`` attribute set to
+            ``'thermal/'``, the path is replaced by ``self.thermalpath``.
+        **kwargs
+            Keyword arguments forwarded as overrides to the default disk
+            parameters (e.g., ``rin``, ``rout``, ``mass``).
+        """
         # Create a copy of the defaults
         params = self.params.disk
 
@@ -63,6 +114,14 @@ class Interface(Model):
                   before creating the disk structure.')
 
     def add_internalheating(self, **kwargs):
+        """Add viscous accretion heating to the grid.
+
+        Parameters
+        ----------
+        **kwargs
+            Keyword arguments forwarded as overrides to the default disk
+            parameters (e.g., ``mdot``, ``alpha``).
+        """
         # Create a copy of the defaults
         params = self.params.disk     
         # Apply overrides given by user
@@ -72,6 +131,21 @@ class Interface(Model):
         self.grid.add_accretionheating(self.disk.viscous_accretion_heating(self.grid.r, self.grid.theta, self.grid.phi))
 
     def add_chemdisk(self, dust=None, **kwargs):
+        """Add a disk component for chemical modeling on the chemistry grid.
+
+        Populates the chemistry grid with dust number density, gas number
+        density, gas temperature, scale height, and vertical visual
+        extinction.
+
+        Parameters
+        ----------
+        dust : object or None, optional
+            Dust opacity model. If it has a ``path`` attribute set to
+            ``'thermal/'``, the path is replaced by ``self.thermalpath``.
+        **kwargs
+            Keyword arguments forwarded as overrides to the default disk
+            parameters.
+        """
         # Create a copy of the defaults
         params = self.params.disk
 
@@ -108,6 +182,19 @@ class Interface(Model):
 
 
     def add_envelope(self, dust=None, **kwargs):
+        """Add an envelope component and its dust density to the grid.
+
+        Parameters
+        ----------
+        dust : object or None, optional
+            Dust opacity model. If it has a ``path`` attribute set to
+            ``'thermal/'``, the path is replaced by ``self.thermalpath``.
+            The dust density is only added to the grid when ``dust`` is
+            not None.
+        **kwargs
+            Keyword arguments forwarded as overrides to the default
+            envelope parameters.
+        """
         # Create a copy of the defaults
         params = self.params.envelope
 
@@ -127,22 +214,31 @@ class Interface(Model):
 
 
     def add_chemmodel(self, chempath="chemistry/", itime=0, species='CO', reader=None):
-        """
-        Add an existing chemistry model to the object.
+        """Load an existing chemistry model onto the grid.
 
-        Args:
-            chempath (str): Relative or absolute path to the chemistry model directory.
-            structure_type (str): Type of structure ('0D' or '1D'). Currently, only '1D' is supported.
-            itime (int): Index of the time output to use from the chemistry model.
-            species (str): Chemical species of interest (e.g., 'CO', 'H2O'). Ultimately it will take all species so that arg will disappear.
-            reader (object, optional): A reader object or module responsible for reading chemistry data. 
-                                    Defaults to self.nautilus.read.
+        Parameters
+        ----------
+        chempath : str, optional
+            Path to the chemistry model directory. Default is
+            ``'chemistry/'``.
+        itime : int, optional
+            Index of the time snapshot to use from the chemistry output.
+            Default is 0.
+        species : str, optional
+            Chemical species of interest (e.g., ``'CO'``, ``'H2O'``).
+            Default is ``'CO'``.
+        reader : object or None, optional
+            Reader responsible for parsing chemistry data. Defaults to
+            ``self.nautilus.read`` when None.
 
-        Raises:
-            ValueError: If an unsupported structure type is provided.
-            FileNotFoundError: If required files are missing in the specified chempath.
-            KeyError: If required parameters are missing in the chemistry data.
-            RuntimeError: For any other errors encountered during processing.
+        Raises
+        ------
+        FileNotFoundError
+            If required files are missing in *chempath*.
+        KeyError
+            If required parameters are missing in the chemistry data.
+        RuntimeError
+            For any other errors encountered during processing.
         """
         # if structure_type != "1D":
         #     raise ValueError(f"Unsupported structure type: {structure_type}. Only '1D' is supported.")

@@ -22,10 +22,67 @@ if TYPE_CHECKING:
     
 
 class Grid:
+    """Spatial and wavelength grid for young stellar object modeling.
+
+    Holds the coordinate system, physical quantities (density, temperature,
+    radiation field), and optional chemistry sub-grids used by radiative
+    transfer and chemical codes.
+
+    Attributes
+    ----------
+    params : DiskParams
+        Disk/envelope structural parameters (radii, resolution, etc.).
+    wave : WaveParams
+        Wavelength grid parameters.
+    density : list of ndarray
+        Total (gas + dust) density components, in g/cm^3.
+    dustdensity : list of ndarray
+        Dust density components for radiative transfer, in g/cm^3.
+    gasdensity_chem : list of ndarray
+        Gas density components for chemistry, in g/cm^3.
+    dustdensity_chem : list of ndarray
+        Dust density components for chemistry, in g/cm^3.
+    dustdensity_single_chem : list of ndarray
+        Single-grain-population dust density for chemistry, in g/cm^3.
+    hg_chem : list of ndarray
+        Gas scale height arrays for the chemistry grid, in AU.
+    tgas_chem : list of ndarray
+        Gas temperature arrays for the chemistry grid, in K.
+    temperature : list of ndarray
+        Dust temperature components, in K.
+    localfield : list of ndarray
+        Local radiation field components.
+    avz : list of ndarray
+        Vertical visual extinction components, in mag.
+    stars : list
+        Stellar source objects.
+    isrf : list
+        Interstellar radiation field components.
+    dust : list
+        Dust opacity/property objects.
+    accretionheating : list of ndarray
+        Viscous accretion heating rate components.
+    chemradii : list of ndarray
+        Radial coordinate arrays imported from existing chemistry models, in AU.
+    chemparam : list
+        Parameter sets imported from existing chemistry models.
+    chemmodel : dict
+        Chemical abundance grids keyed by species name.
+    """
+
     def __init__(self,
                  params: DiskParams,
                  wave: WaveParams
     ):
+        """Initialize the Grid with disk parameters and wavelength settings.
+
+        Parameters
+        ----------
+        params : DiskParams
+            Disk/envelope structural parameters.
+        wave : WaveParams
+            Wavelength grid parameters.
+        """
         self.params = params
         self.wave = wave
         self.density = []
@@ -51,57 +108,177 @@ class Grid:
     #-----
 
     def add_star(self, star):
+        """Append a stellar source to the grid.
+
+        Parameters
+        ----------
+        star : object
+            Stellar source object containing luminosity, temperature, etc.
+        """
         self.stars.append(star)
 
     def add_isrf(self, isrf):
+        """Append an interstellar radiation field component.
+
+        Parameters
+        ----------
+        isrf : object
+            Interstellar radiation field specification.
+        """
         self.isrf.append(isrf)
 
     def add_temperature(self, temperature):
+        """Append a dust temperature component.
+
+        Parameters
+        ----------
+        temperature : ndarray
+            Dust temperature array, in K.
+        """
         self.temperature.append(temperature)
 
     def add_localfield(self, localfield):
+        """Append a local radiation field component.
+
+        Parameters
+        ----------
+        localfield : ndarray
+            Local radiation field array.
+        """
         self.localfield.append(localfield)
 
     def add_density(self, density):
+        """Append a total density component.
+
+        Parameters
+        ----------
+        density : ndarray
+            Total (gas + dust) density array, in g/cm^3.
+        """
         self.density.append(density)
 
     def add_dustdensity(self, density):
+        """Append a dust density component for radiative transfer.
+
+        Parameters
+        ----------
+        density : ndarray
+            Dust density array, in g/cm^3.
+        """
         self.dustdensity.append(density)
 
     def add_dustdensity_chem(self, density):
+        """Append a dust density component for chemistry.
+
+        Parameters
+        ----------
+        density : ndarray
+            Dust density array for the chemistry grid, in g/cm^3.
+        """
         self.dustdensity_chem.append(density)
 
     def add_dustdensity_single_chem(self, density):
+        """Append a single-grain-population dust density for chemistry.
+
+        Parameters
+        ----------
+        density : ndarray
+            Single-grain dust density array for the chemistry grid, in g/cm^3.
+        """
         self.dustdensity_single_chem.append(density)
 
     def add_gasdensity_chem(self, density):
+        """Append a gas density component for chemistry.
+
+        Parameters
+        ----------
+        density : ndarray
+            Gas density array for the chemistry grid, in g/cm^3.
+        """
         self.gasdensity_chem.append(density)
 
     def add_gastemperature_chem(self, gas_temperature):
+        """Append a gas temperature component for chemistry.
+
+        Parameters
+        ----------
+        gas_temperature : ndarray
+            Gas temperature array for the chemistry grid, in K.
+        """
         self.tgas_chem.append(gas_temperature)
 
     def add_hg_chem(self, hg):
+        """Append a gas scale height array for chemistry.
+
+        Parameters
+        ----------
+        hg : ndarray
+            Gas scale height array, in AU.
+        """
         self.hg_chem.append(hg)
 
     def add_avz(self, av_z):
+        """Append a vertical visual extinction component.
+
+        Parameters
+        ----------
+        av_z : ndarray
+            Vertical visual extinction array, in mag.
+        """
         self.avz.append(av_z)
 
     def add_dust(self, dust):
+        """Append a dust opacity/property object.
+
+        Parameters
+        ----------
+        dust : object
+            Dust opacity or property specification.
+        """
         self.dust.append(dust)
 
     def add_accretionheating(self, q_visc):
+        """Append a viscous accretion heating rate component.
+
+        Parameters
+        ----------
+        q_visc : ndarray
+            Viscous heating rate array.
+        """
         self.accretionheating.append(q_visc)
 
     def add_existingchemradii(self,existingchemradii):
-        #args: chemgrid corresponds to an array with the radius and z points.
-        self.chemradii.append(existingchemradii) 
+        """Append radial coordinates from an existing chemistry model.
+
+        Parameters
+        ----------
+        existingchemradii : ndarray
+            Array of radial and vertical grid points from an existing
+            chemistry model, in AU.
+        """
+        self.chemradii.append(existingchemradii)
     
     def add_existingchemparam(self,existingchemparam):
-        self.chemparam.append(existingchemparam)    
+        """Append parameters from an existing chemistry model.
+
+        Parameters
+        ----------
+        existingchemparam : object
+            Parameter set from an existing chemistry model.
+        """
+        self.chemparam.append(existingchemparam)
 
     def add_existingchemmodel(self,existingchemmodel, species):
-        #args: chemgrid corresponds to an array with the radius and z points.
-        self.chemmodel[species] = existingchemmodel    
+        """Store abundance data from an existing chemistry model for a species.
+
+        Parameters
+        ----------
+        existingchemmodel : ndarray
+            Abundance grid for the given species.
+        species : str
+            Chemical species name used as the dictionary key.
+        """
+        self.chemmodel[species] = existingchemmodel
 
         
 
@@ -110,7 +287,26 @@ class Grid:
     #-----
 
     def set_cartesian_grid(self, xmin, xmax, nx):
-        #w1, w2, w3 provide grid with coordinates using the center of each cell.
+        """Build a uniform Cartesian grid and return edges and cell centres.
+
+        The same range is used for all three axes (x, y, z).
+
+        Parameters
+        ----------
+        xmin : float
+            Minimum coordinate value, in AU.
+        xmax : float
+            Maximum coordinate value, in AU.
+        nx : int
+            Number of grid edges along each axis.
+
+        Returns
+        -------
+        edges : ndarray, shape (3, nx)
+            Cell edge coordinates stacked as (x, y, z).
+        centres : ndarray, shape (3, nx-1)
+            Cell centre coordinates stacked as (w1, w2, w3).
+        """
         self.coordsystem = "cartesian"
 
         x = np.linspace(xmin, xmax, nx)
@@ -173,12 +369,19 @@ class Grid:
         self.phi_edge = phi_edge
 
     def set_chemdisk_grid(self, r, max_H=4, nz_chem=64):
-        """
-        desc: Spatial grid for disk chemistry model. Defined from a upper limit for the disk atmosphere.
-        args:
-        -max_H: disk maximum gas scale height below which chemistry grid exists.
-        -nz_chem: number of vertical spatial points. Same at all radii.
-        -r: radii in au.
+        """Build a vertical chemistry grid for a disk model.
+
+        The vertical coordinate runs from ``max_H`` scale heights down
+        to the midplane with uniform spacing in normalised units.
+
+        Parameters
+        ----------
+        r : array_like
+            Radial positions, in AU.
+        max_H : float, optional
+            Upper limit of the grid expressed in gas scale heights.
+        nz_chem : int, optional
+            Number of vertical grid points (same at all radii).
         """
         #hg = self.disk.scaleheight(np.array(r))
         pts = np.arange(0, nz_chem, 1)
@@ -193,14 +396,27 @@ class Grid:
 
 
     def set_chem_grid(self, r, z0=0, zmax=None, msize=None, nbcells=70):
-        """
-        desc: Custom spatial grid for chemistry model. Can be disk, envelope...
-        args:
-        -r [au]: radii in au. Must be 1D array of dim = number of radii. Must be inside the radmc3d model.
-        -z0 [au]: minimum altitude. Zero by default.
-        -zmax [au]: maximum altitude. 
-        -msize [au]: modele size in AU if the model is spherical, the user can give msize in order to compute the zmax at each radius.
-        -nbcells: number of vertical cells. Same for all radii.  
+        """Build a custom spatial grid for chemistry (disk, envelope, etc.).
+
+        Two modes are available. If *zmax* is given, the vertical extent is
+        uniform at all radii. If *msize* is given, the maximum altitude at
+        each radius follows a spherical envelope boundary.  Vertical
+        coordinates are stored in decreasing order as required by Nautilus.
+
+        Parameters
+        ----------
+        r : ndarray
+            1-D array of radial positions, in AU. Must lie within the
+            RADMC-3D model domain.
+        z0 : float, optional
+            Minimum altitude, in AU.
+        zmax : float, optional
+            Maximum altitude applied uniformly at all radii, in AU.
+        msize : float, optional
+            Model size (sphere radius) in AU. When provided, the maximum
+            altitude at each radius is computed as sqrt(msize^2 - r^2).
+        nbcells : int, optional
+            Number of vertical cells (same for all radii).
         """
         self.nz_chem = nbcells
  
@@ -233,7 +449,14 @@ class Grid:
             # plt.ylim(0, 5005)
             # #plt.show()
 
-    def set_wavelength_grid(self, log=True): #microns
+    def set_wavelength_grid(self, log=True):
+        """Build the wavelength grid used by the radiative transfer.
+
+        Parameters
+        ----------
+        log : bool, optional
+            If True, use logarithmic spacing; otherwise linear spacing.
+        """
         lmin = self.wave.lmin
         lmax = self.wave.lmax
         nlam = self.wave.nlam
@@ -245,6 +468,13 @@ class Grid:
 
 
     def set_mcmonowavelength_grid(self, log=True):
+        """Build the monochromatic Monte Carlo wavelength grid.
+
+        Parameters
+        ----------
+        log : bool, optional
+            If True, use logarithmic spacing; otherwise linear spacing.
+        """
         lmin_mono = self.wave.lmin_mono
         lmax_mono = self.wave.lmax_mono
         nlam_mono = self.wave.nlam_mono

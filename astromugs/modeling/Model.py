@@ -20,8 +20,38 @@ import matplotlib.pyplot as plt
 
 
 class Model:
+    """Main user-facing class for setting up and running disk models.
+
+    Orchestrates the full modeling pipeline: dust continuum radiative transfer
+    with RADMC-3D, line radiative transfer, local radiation field computation,
+    and chemical modeling with Nautilus. Holds the grid, structural parameters,
+    thermal parameters, and provides methods to read, write, and run each
+    modeling stage.
+
+    Attributes
+    ----------
+    params : StructureParams
+        Structural parameters for the disk model.
+    thermalparams : ThermalParams
+        Thermal and wavelength parameters for radiative transfer.
+    thermalpath : str
+        Relative path to the directory containing thermal / RADMC-3D files.
+    chempath : str
+        Relative path to the directory containing chemistry (Nautilus) files.
+    radmc3d_cmd : str
+        Command used to invoke RADMC-3D (can be overridden to point to a
+        specific binary).
+    grid : Grid
+        The spatial grid object holding coordinates, dust, and field data.
+    nautilus : module
+        Reference to the Nautilus chemistry module.
+    Ta : ndarray
+        Surface-area-weighted dust temperature array, populated after
+        ``run_continuum`` or ``write_nautilus``.
+    """
 
     def __init__(self):
+        """Initialize the Model with default parameters, grid, and paths."""
         self.params = StructureParams()
         self.thermalparams = ThermalParams()
         self.thermalpath = 'thermal/'
@@ -32,11 +62,23 @@ class Model:
         
 
     def run_continuum(self, write_control=False, **keywords):
-        """ 
-        Notes:
-        run MC dust radiative transfer, open the resulting dust temperature as an array and computes the surface-area weigthed temperature. If run == False, user assumes the RADMC3D output files already exist.
-        -----
-	    """	
+        """Run dust continuum radiative transfer and compute area-weighted temperature.
+
+        Executes the RADMC-3D Monte Carlo dust radiative transfer, reads the
+        resulting dust temperature, and computes the surface-area-weighted
+        temperature ``self.Ta``. If the output files already exist they are
+        read directly; missing files produce a warning but do not halt
+        execution (useful when running chemistry without a dust structure).
+
+        Parameters
+        ----------
+        write_control : bool, optional
+            If True, write the RADMC-3D control file before running.
+            Default is False.
+        **keywords
+            Additional keyword arguments forwarded to
+            ``run_thermal_radmc3d``.
+        """
         # FOLDER WITH THERMAL FILES
         thermpath = self.thermalpath
 
@@ -128,6 +170,43 @@ class Model:
                        itime=59, \
                        species='CO', \
                        **keywords):
+        """Run line radiative transfer and optionally produce a channel map image.
+
+        Parameters
+        ----------
+        make_image : bool, optional
+            If True, generate a synthetic image via RADMC-3D. Default is True.
+        write_control : bool, optional
+            If True, write the RADMC-3D control file before running.
+            Default is False.
+        lines_format : str, optional
+            Format of the molecular data file (e.g., 'leiden'). Default is
+            'leiden'.
+        path : str, optional
+            Relative or absolute path to the chemistry model directory.
+            Default is 'chemistry/'.
+        incl : float, optional
+            Disk inclination angle in degrees. Default is 90.
+        npix : int, optional
+            Number of pixels per side of the output image. Default is 800.
+        iline : int or None, optional
+            Line transition index for RADMC-3D. Default is None.
+        lambda_micron : float or None, optional
+            Wavelength in microns at which to produce the image. Default is
+            None.
+        widthkms : float, optional
+            Velocity width of the line channel map in km/s. Default is 10.
+        linenlam : int, optional
+            Number of wavelength channels across the line. Default is 100.
+        itime : int, optional
+            Index of the chemistry time output to use. Default is 59.
+        species : str, optional
+            Chemical species for the line transfer (e.g., 'CO'). Default is
+            'CO'.
+        **keywords
+            Additional keyword arguments forwarded to
+            ``run_image_radmc3d``.
+        """
         thermpath = self.thermalpath
 
         if make_image == True:
@@ -137,21 +216,27 @@ class Model:
 
 
     def convert_nautilus2radmc(self, species='CO', dust_density=False, dust_temperature=False, numberdens=False):
-        """
-        -Convert the chemistry grid into radmc3d files. It needs a chemistry model to be run. 
-        -The conversion from nautilus to radmc3f files can be done for dust_density.inp, dust_temperature.inp, and numberdens_XX.inp. The user can choice to create all or 1 or 2 files with the flags.
-        -The chemistry model has to added to the object using add_chemmodel() function. 
-        -note that the conversion to radmc3d REQUIRES the presence of amr_grid.inp file first. Indeed, chemistry models usually have a lower resolution than that for radiative transfer and it is therefore better to define the chosen RT grid. The code will do the rest (interpolation, etc.). 
+        """Convert Nautilus chemistry output to RADMC-3D input files.
 
+        Interpolates chemistry model results onto the radiative transfer grid
+        and writes the corresponding RADMC-3D input files. The chemistry model
+        must first be attached via ``add_chemmodel()``. An ``amr_grid.inp``
+        file must already exist (or the grid must be set) because the chemistry
+        grid is typically at lower resolution than the RT grid and requires
+        interpolation.
 
-        Args:
-            chempath (str): Relative or absolute path to the chemistry model directory.
-            itime (int): Index of the time output to use from the chemistry model. Not yet coded.
-            species (str) or list of str: Chemical species of interest (e.g., 'CO', 'H2O') for the creation of numberdens_XX.inp. 
-            reader (object, optional): A reader object or module responsible for reading chemistry data. 
-                                    Defaults to self.nautilus.read.
-        Raises:
-
+        Parameters
+        ----------
+        species : str or list of str, optional
+            Chemical species to convert (e.g., 'CO', 'H2O'). Used for
+            creating ``numberdens_XX.inp``. Default is 'CO'.
+        dust_density : bool, optional
+            If True, write a ``dust_density.inp`` file. Default is False.
+        dust_temperature : bool, optional
+            If True, write a ``dust_temperature.inp`` file. Default is False.
+        numberdens : bool, optional
+            If True, write a ``numberdens_XX.inp`` file for the given
+            species. Default is False.
         """
         thermpath = self.thermalpath
 
@@ -183,6 +268,26 @@ class Model:
 
             
     def run_localfield(self, nphot_mono=None, write_mcmono=False, run=True, **keywords):
+        """Compute the local mean radiation field with RADMC-3D monochromatic Monte Carlo.
+
+        Optionally writes the monochromatic wavelength file, runs the
+        RADMC-3D monochromatic Monte Carlo, and reads the resulting
+        ``mean_intensity.out`` into ``self.grid.localfield``.
+
+        Parameters
+        ----------
+        nphot_mono : int or None, optional
+            Number of monochromatic photon packages. If None, RADMC-3D uses
+            its default. Default is None.
+        write_mcmono : bool, optional
+            If True, write the ``mcmono_wavelength_micron.inp`` file before
+            running. Default is False.
+        run : bool, optional
+            If True, execute the RADMC-3D monochromatic run. Set to False to
+            skip execution and only read existing output. Default is True.
+        **keywords
+            Additional keyword arguments forwarded to ``write_continuum``.
+        """
 
         self.write_continuum(mcmono=write_mcmono, **keywords)
         
@@ -198,18 +303,87 @@ class Model:
 
     def run_thermal_radmc3d(self, verbose=True, timelimit=7200, \
             nice=None, **keywords):
+        """Run the RADMC-3D thermal Monte Carlo dust radiative transfer.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+            If True, print RADMC-3D output to stdout. Default is True.
+        timelimit : int, optional
+            Maximum wall-clock time in seconds before the run is killed.
+            Default is 7200 (2 hours).
+        nice : int or None, optional
+            Unix nice priority for the RADMC-3D process. Default is None.
+        **keywords
+            Additional keyword arguments (currently unused).
+        """
         radmc3d.run.thermal(verbose=verbose, timelimit=timelimit, nice=nice, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
     def run_localfield_radmc3d(self, nphot_mono=None, verbose=True, timelimit=7200):
+        """Run the RADMC-3D monochromatic Monte Carlo for the local radiation field.
+
+        Parameters
+        ----------
+        nphot_mono : int or None, optional
+            Number of monochromatic photon packages. If None, RADMC-3D uses
+            its default. Default is None.
+        verbose : bool, optional
+            If True, print RADMC-3D output to stdout. Default is True.
+        timelimit : int, optional
+            Maximum wall-clock time in seconds. Default is 7200 (2 hours).
+        """
         radmc3d.run.localfield(nphot_mono=nphot_mono, verbose=verbose, timelimit=timelimit, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
     def run_image_radmc3d(self, npix=300, lambda_micron=None, iline=None, incl=None, verbose=True):
+        """Run RADMC-3D to produce a synthetic image.
+
+        Parameters
+        ----------
+        npix : int, optional
+            Number of pixels per side of the image. Default is 300.
+        lambda_micron : float or None, optional
+            Wavelength of the image in microns. Default is None.
+        iline : int or None, optional
+            Line transition index. Default is None.
+        incl : float or None, optional
+            Inclination angle in degrees. Default is None.
+        verbose : bool, optional
+            If True, print RADMC-3D output to stdout. Default is True.
+        """
         radmc3d.run.image(npix=npix, lambda_micron=lambda_micron, iline=iline, incl=incl, verbose=verbose, timelimit=7200, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
 
 
     def write_continuum(self, dens=False, grid=False, opac=False, control=False, stars=False, wave=False, mcmono=False, ext=False):
+        """Write RADMC-3D input files for dust continuum radiative transfer.
+
+        Each boolean flag controls whether the corresponding input file is
+        written. If no flags are set to True, a warning is printed. The
+        thermal directory is created if it does not exist.
+
+        Parameters
+        ----------
+        dens : bool, optional
+            Write ``dust_density.inp``. Default is False.
+        grid : bool, optional
+            Write ``amr_grid.inp``. Default is False.
+        opac : bool, optional
+            Write ``dustopac.inp`` (reads existing ``dustkap*`` files in
+            the thermal directory). Default is False.
+        control : bool, optional
+            Write ``radmc3d.inp`` control file. Default is False.
+        stars : bool, optional
+            Write ``stars.inp`` with stellar properties. Default is False.
+        wave : bool, optional
+            Write ``wavelength_micron.inp``. Default is False.
+        mcmono : bool, optional
+            Write ``mcmono_wavelength_micron.inp`` for monochromatic Monte
+            Carlo. Default is False.
+        ext : bool, optional
+            Write ``external_source.inp`` for the interstellar radiation
+            field. Default is False.
+        """
         #os.system("rm thermal/*.inp")
 
         thermpath = self.thermalpath
@@ -284,6 +458,31 @@ class Model:
             print('----------------------------\n')
                 
     def write_line(self, control=False, line=False, gasvelocity=False, gastemp=False, microturb=False, line_format='leiden', species='CO', star_mass=1):
+        """Write RADMC-3D input files for line radiative transfer.
+
+        Parameters
+        ----------
+        control : bool, optional
+            Write ``radmc3d.inp`` control file. Default is False.
+        line : bool, optional
+            Write ``lines.inp`` molecular line data file. Default is False.
+        gasvelocity : bool, optional
+            Write ``gas_velocity.inp``. Default is False.
+        gastemp : bool, optional
+            Write gas temperature file (not yet implemented). Default is
+            False.
+        microturb : bool, optional
+            Write microturbulence file (not yet implemented). Default is
+            False.
+        line_format : str, optional
+            Format of the molecular data file (e.g., 'leiden'). Default is
+            'leiden'.
+        species : str, optional
+            Chemical species for the line file. Default is 'CO'.
+        star_mass : float, optional
+            Stellar mass in solar masses, used for Keplerian velocity
+            computation. Default is 1.
+        """
         #os.system("rm thermal/*.inp")
 
         thermpath = self.thermalpath
@@ -307,35 +506,113 @@ class Model:
             radmc3d.write.gas_velocity(star_mass=star_mass, r=self.grid.r, theta=self.grid.theta, phi=self.grid.phi, object="disk", thermpath=thermpath)   
 
 
-    # ----WRITE NAUTILUS INPUT FILES----
-    # ----------------------------------
-    #If coupling_dens == True, the code assumes the user did not add a disk or envelope structure and that there is no calculation of Hg, ng, nd, etc. 
-    def write_nautilus(self, sizes=np.array([[0.1]]), 
-                       uv_ref=3400, 
-                       nH_to_AV_conversion=1.600e+21, 
-                       rsingle=0.1, 
-                       dtogas=1e-2, 
+    def write_nautilus(self, sizes=np.array([[0.1]]),
+                       uv_ref=3400,
+                       nH_to_AV_conversion=1.600e+21,
+                       rsingle=0.1,
+                       dtogas=1e-2,
                        ref_radius=100,
-                       stop_time=3e6, 
-                       nb_outputs = 64, 
-                       tunneling=1, 
-                       is_h2_formation_rate=0, 
+                       stop_time=3e6,
+                       nb_outputs = 64,
+                       tunneling=1,
+                       is_h2_formation_rate=0,
                        min_gas_density=1e0,
                        min_av=1e-2,
                        max_uv=None,
-                       temp_gas='dust', 
-                       static=True, 
-                       param=True, 
-                       element=True, 
+                       temp_gas='dust',
+                       static=True,
+                       param=True,
+                       element=True,
                        abundances='atomic',
-                       network=True, 
-                       multi_grain=True, 
+                       network=True,
+                       multi_grain=True,
                        tempdecoup=True,
-                       coupling_dens=False, 
-                       coupling_temp=True, 
-                       coupling_av=True, 
+                       coupling_dens=False,
+                       coupling_temp=True,
+                       coupling_av=True,
                        **keywords):
-        
+        """Write Nautilus chemistry input files for each radial point.
+
+        Reads the RADMC-3D thermal output (grid, dust density, dust
+        temperature, local radiation field), couples the physical quantities
+        onto the chemistry grid, and writes one set of Nautilus input files
+        per radial grid point inside the chemistry directory. The existing
+        chemistry directory is removed and recreated.
+
+        When ``coupling_dens`` is True the code derives dust and gas number
+        densities from the RADMC-3D dust density rather than from an
+        analytically added disk/envelope structure.
+
+        Parameters
+        ----------
+        sizes : ndarray, optional
+            Grain size array in microns, shape ``(n_structures, n_bins)``.
+            Default is ``np.array([[0.1]])``.
+        uv_ref : float, optional
+            Reference UV field strength in Habing units. Default is 3400.
+        nH_to_AV_conversion : float, optional
+            Column density to visual extinction conversion factor in
+            cm^-2. Default is 1.6e21.
+        rsingle : float, optional
+            Single representative grain radius in microns. Default is 0.1.
+        dtogas : float, optional
+            Dust-to-gas mass ratio. Default is 1e-2.
+        ref_radius : float, optional
+            Reference radius in AU for the UV scaling. Default is 100.
+        stop_time : float, optional
+            Chemical evolution stop time in years. Default is 3e6.
+        nb_outputs : int, optional
+            Number of time outputs written by Nautilus. Default is 64.
+        tunneling : int, optional
+            Tunneling flag for Nautilus (0 or 1). Default is 1.
+        is_h2_formation_rate : int, optional
+            H2 formation rate flag for Nautilus. Default is 0.
+        min_gas_density : float, optional
+            Minimum gas number density in cm^-3 enforced in the chemistry
+            input. Default is 1.
+        min_av : float, optional
+            Minimum visual extinction in mag enforced in the chemistry
+            input. Default is 1e-2.
+        max_uv : float or None, optional
+            Maximum UV field value. If None, no cap is applied. Default is
+            None.
+        temp_gas : str, optional
+            Gas temperature source: 'dust' uses the area-weighted dust
+            temperature, 'param' uses a parametrized gas temperature added
+            to the grid. Default is 'dust'.
+        static : bool, optional
+            Write the ``1D_static.dat`` (or multi-grain equivalent) input
+            file. Default is True.
+        param : bool, optional
+            Write the Nautilus ``parameters.in`` file. Default is True.
+        element : bool, optional
+            Write the ``element.in`` file. Default is True.
+        abundances : str, optional
+            Initial abundances preset name (e.g., 'atomic'). Default is
+            'atomic'.
+        network : bool, optional
+            Write the chemical network file. Default is True.
+        multi_grain : bool, optional
+            If True, use multi-grain chemistry mode (NMGC). Default is
+            True.
+        tempdecoup : bool, optional
+            If True, compute a separate area-weighted dust temperature
+            from the full size distribution. If False, use the single-bin
+            temperature. Default is True.
+        coupling_dens : bool, optional
+            If True, derive dust and gas densities from the RADMC-3D dust
+            density file. Default is False.
+        coupling_temp : bool, optional
+            If True, interpolate dust temperature from the RADMC-3D output
+            onto the chemistry grid. Default is True.
+        coupling_av : bool, optional
+            If True, compute visual extinction from the local radiation
+            field. Default is True.
+        **keywords
+            Additional keyword arguments forwarded to
+            ``nautilus.write.parameters_nmgc``.
+        """
+
         #-----------------------------------------
         # REMOVE IF EXISTS AND CREATE CHEMISTRY FOLDER
         #-----------------------------------------

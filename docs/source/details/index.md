@@ -2,19 +2,36 @@
 myst:
   html_meta:
     "description lang=en": |
-      Documentation for users who wish to build sphinx sites with
-      pydata-sphinx-theme.
+      Detailed documentation of astroMUGS classes, methods, and modules.
 ---
 
 # astroMUGS in details
 
-A detailed description of all arguments and functions.
-
+A detailed description of all classes, methods, and modules.
 
 ```{toctree}
-:caption: More details
+:caption: Modeling
 
-radiative
-chemistry
+grid
+disk
+model
 ```
 
+```{toctree}
+:caption: Radiative transfer
+
+radiative
+```
+
+```{toctree}
+:caption: Chemistry
+
+chemistry
+coupling
+```
+
+```{toctree}
+:caption: API Reference
+
+api
+```

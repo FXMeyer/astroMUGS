@@ -11,9 +11,10 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
-# import sys
 import datetime
-# sys.path.insert(0, os.path.abspath('.'))
+import sys
+sys.path.insert(0, os.path.abspath('../../'))  # path to astromugs package root
+
 from sphinx.application import Sphinx
 
 # Configuration file for the Sphinx documentation builder.
@@ -59,6 +60,11 @@ source_suffix = ['.rst', '.md']
 jupyterlite_config = "jupyterlite_config.json"
 
 
+
+autosummary_generate = True
+autodoc_member_order = 'bysource'
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),

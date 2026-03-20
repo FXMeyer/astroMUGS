@@ -524,7 +524,8 @@ class Model:
                                     uvfactor,
                                     min_gas_density=min_gas_density,
                                     min_av = min_av,
-                                    max_uv=max_uv)
+                                    max_uv=max_uv,
+                                    rho_m=rho_m)
             if multi_grain == True:
                 if param == True:
                     nautilus.write.parameters_nmgc(path, grain_temp='fixed_to_dust_size', nb_outputs=nb_outputs, multi_grain=1, resolution=self.grid.nz_chem, tunneling=tunneling, is_h2_formation_rate=is_h2_formation_rate, stop_time=stop_time, uv_flux=np.mean(uvfactor), **keywords)
@@ -553,7 +554,8 @@ class Model:
                                     uvfactor,
                                     min_gas_density=min_gas_density,
                                     min_av = min_av,
-                                    max_uv=max_uv)
+                                    max_uv=max_uv,
+                                    rho_m=rho_m)
             
                 if nbspecies > 1: 
                     if len(self.grid.hg_chem) > 0:
@@ -562,7 +564,7 @@ class Model:
                     elif coupling_dens == True: 
                         nH = n_gas[idx, :]
                         nd = n_dust[:, idx, :]
-                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density)
+                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density, rho_m=rho_m)
                 else:
                     print('WARNING: multi_grain = True, but the model has only one grain bin. Please, check the number of grain size or switch multi_grain to False.')
 

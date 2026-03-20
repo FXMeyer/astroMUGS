@@ -324,8 +324,8 @@ def parameters_nmgc(path, resolution, phase=1, \
     f.write("minimum_initial_abundance =  {0:.3E} ! default minimum initial fraction abundance\n".format(minimum_initial_abundance))
     f.close()
 
-def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, dtogas=1e-2):
-    min_dust_density = dtogas * mu * amu * min_gas_density
+def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, dtogas=1e-2, rho_m=2.5):
+    nb_grains = len(sizes[-1])
     f = open(path + '1D_grain_sizes.in',"w")
     f.write('! grain-radius [cm] 1/abundance  grain-temp CR-peak-Temperaturegrain[K] spatial-point\n')
     f.write('\n')
@@ -335,7 +335,9 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
             f.write('%10.4E ' %a)
         f.write('    ')
         for ai, a in enumerate(sizes[-1]):
-            inv_ab = nh[zi]/max(dust_density[ai, zi], min_dust_density)
+            grain_mass = (4./3.) * np.pi * rho_m * (a*1e-4)**3
+            min_dust_nd = dtogas * mu * amu * min_gas_density / (grain_mass * nb_grains)
+            inv_ab = nh[zi]/max(dust_density[ai, zi], min_dust_nd)
             f.write('%12.6E ' %inv_ab)
         f.write('    ')
         for ai, a in enumerate(sizes[-1]):
@@ -388,12 +390,16 @@ def uv_factor(isrf, lam_mono, R_star, T_star, rchem, zchem, external):
         bbint += black_body(T_star, lam_mono[i])*abs(freq[i+1]-freq[i]) #integrate BB spectrum over the chosen wavelength range
 
 
-    if len(external) > 0: #meaning that external_source.inp exists and we assume radiation field was computed using extra external radiation source.
-            uvref = (bbint+isrfint)/isrfint
-    elif len(external) == 0:  #no external source used.
-            uvref = bbint/isrfint
+    # if len(external) > 0: #meaning that external_source.inp exists and we assume radiation field was computed using extra external radiation source.
+    #         uvref = (bbint+isrfint)/isrfint
+    # elif len(external) == 0:  #no external source used.
+    #         uvref = bbint/isrfint
 
-    uvfact = uvref*(R_star**2/(np.pi*(rchem**2 + zchem**2))) # dilutes by distance from source. 
+    # uvfact = uvref*(R_star**2/(np.pi*(rchem**2 + zchem**2))) # dilutes by distance from source. 
+
+    uvref = bbint / isrfint  # stellar UV relative to ISRF at stellar surface
+    uvfact = uvref * (R_star**2 / (np.pi * (rchem**2 + zchem**2))) + 1.0
+
 
     return uvfact
 
@@ -412,10 +418,12 @@ def static(path, dist, gas_density,
            min_gas_density=1e0,
            min_av=1e-3,
            max_uv=None,
-           dtogas=1e-2):
+           dtogas=1e-2,
+           rho_m=2.5):
     distance = dist
     nh = np.maximum(gas_density, min_gas_density)
-    min_dust_density = dtogas * mu * amu * min_gas_density
+    grain_mass = (4./3.) * np.pi * rho_m * (r_grain*1e-4)**3
+    min_dust_density = dtogas * mu * amu * min_gas_density / grain_mass
     Tgas = T_gas#*1.02
     avz = np.maximum(av_z, min_av)#/1.05#*2.8
     #avz = np.where(avz>45, avz*1.05, avz)
@@ -427,10 +435,11 @@ def static(path, dist, gas_density,
     avnhfact = avnh_fact
     rgrain = r_grain*1e-4*np.ones(len(dist))
     inv_ab = nh/np.maximum(dust_density, min_dust_density)
-    uvf = uvfactor#*10
+    uvf = uvfactor#/10
     # Cap UV where density is at the floor
     if max_uv is not None:
-        uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, max_uv), uvf)
+        #uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, max_uv), uvf)
+        uvf = np.minimum(uvf, max_uv)
 
     static_array = np.stack((distance, nh, Tgas, avz, diff_coef, Tdust, inv_ab, avnhfact, rgrain, uvf), axis=-1)
     header_static = "z [AU] ; H Gas density [part/cm^3] ; Tgas [K] ; Av [mag] ; Diffusion coef [cm^2/s]; Tdust [K]; 1/ab of grains ; AV/NH conversion factor ; Grain radius (cm) ; uv factor in unit of the reference flux"

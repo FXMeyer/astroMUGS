@@ -17,6 +17,7 @@ dependencies = [
     "matplotlib",
     "zarr",
     "xarray",
+    "astropy",
 ]
 dynamic = ["version", "readme", "classifiers", "requires-python"]
 

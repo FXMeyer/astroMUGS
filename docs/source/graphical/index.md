@@ -8,7 +8,7 @@ myst:
 
 # Graphical User Interface: astroMUGS-ui
 
-A detailed description of the graphical user interface of astroMUGS.
+A node-based graphical user interface (GUI) of astroMUGS. This section provides all details to install and use the astroMUGS GUI.
 
 
 ```{toctree}

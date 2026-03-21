@@ -57,7 +57,7 @@ Two variants exist:
 - ``dust_temperature`` / ``dust_temperature_single``: use physical :math:`z` coordinates (for ``set_chem_grid``)
 - ``dust_temperature_disk`` / ``dust_temperature_single_disk``: use scale-height coordinates (for ``set_chemdisk_grid``)
 
-Both use nearest-neighbor lookup to find the closest RADMC3D cell for each chemistry grid point.
+Both use bilinear interpolation (``RegularGridInterpolator``) similarly to the dust density.
 
 
 UV extinction coupling

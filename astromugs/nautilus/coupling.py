@@ -103,7 +103,7 @@ def dust_temperature_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
     """Remap multi-species RADMC3D dust temperatures onto the Nautilus grid using scale heights.
 
     Converts temperatures from the RADMC3D spherical grid to the Nautilus
-    cylindrical grid via nearest-neighbor lookup, then smooths vertical
+    cylindrical grid via bilinear interpolation, then smooths vertical
     profiles with a 5-point moving average.
 
     Parameters
@@ -130,31 +130,44 @@ def dust_temperature_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
         ``(nbspecies, nrchem, nzchem)``, in K.
     """
     nbspecies, nz, ny, nx = temp_radmc3d.shape
+    nrchem = len(rchem)
+    nzchem = len(zchem)
 
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
 
+    # Convert normalised zchem to physical heights using scale heights
     hhg, zz = np.meshgrid(hg, zchem, indexing='ij')
-    zz = hhg*zz
-    temp_naut = np.ones((nbspecies, len(rchem), len(zchem)))
-    temp_naut_smooth = np.ones((nbspecies, len(rchem), len(zchem)))
+    zz = hhg * zz  # (nrchem, nzchem) in cm
+
+    # Build query points: convert cylindrical (rchem, zz) -> spherical (d_pt, theta_pt)
+    d_pts = np.sqrt(rchem[:, None]**2 + zz**2)            # (nrchem, nzchem)
+    theta_pts = np.arccos(np.clip(zz / d_pts, -1, 1))     # (nrchem, nzchem)
+
+    # Clamp query points to the RADMC3D grid range
+    d_pts = np.clip(d_pts, d_cm[0], d_cm[-1])
+    theta_pts = np.clip(theta_pts, theta[0], theta[-1])
+
+    # Stack into (N, 2) array for the interpolator
+    query = np.column_stack([d_pts.ravel(), theta_pts.ravel()])
+
+    temp_naut = np.ones((nbspecies, nrchem, nzchem))
+    temp_naut_smooth = np.ones((nbspecies, nrchem, nzchem))
+
     for size_id in range(nbspecies):
-        for idx, r in enumerate(rchem):
-            for alt in range(len(zchem)):
-                d_pt = np.sqrt(r**2 + zz[idx, alt]**2)  #convert from cartesian to spherical
-                theta_pt = np.arccos(zz[idx, alt]/d_pt) #convert from cartesian to spherical
-                closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
-                closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
-                #temp_naut[size_id, idx, alt] = temp_radmc3d[size_id, closest_d[0], closest_t[0], 0] 
-                temp_naut[size_id, idx, alt] = temp_radmc3d[size_id, 0, closest_t[0], closest_d[0]] 
+        data_2d = temp_radmc3d[size_id, 0, :, :]  # (ntheta, nr)
+        interp = RegularGridInterpolator(
+            (d_cm, theta), data_2d.T, method='linear', bounds_error=False, fill_value=None
+        )
+        temp_naut[size_id] = interp(query).reshape(nrchem, nzchem)
 
     #SMOOTHING TEMPERATURE PROFILE
-    for idx in range(len(rchem)):
+    for idx in range(nrchem):
         for size_id in range(nbspecies):
-            temp_naut_smooth[size_id, idx, :] = moving_average(temp_naut[size_id, idx, :], 5) #average the values over a rolling window of 5 points.
+            temp_naut_smooth[size_id, idx, :] = moving_average(temp_naut[size_id, idx, :], 5)
     temp_naut_smooth[:, :, 0:2] = temp_naut[:, :, 0:2]  #clean the boundary effects
-    temp_naut_smooth[:, :, -2:] = temp_naut[:, :, -2:] 
-    
-    return temp_naut_smooth 
+    temp_naut_smooth[:, :, -2:] = temp_naut[:, :, -2:]
+
+    return temp_naut_smooth
 
 def dust_temperature_single_disk(temp_radmc3d, rchem, zchem, d, theta, hg=None):
     """Remap single-species RADMC3D dust temperature onto the Nautilus grid using scale heights.
@@ -216,7 +229,7 @@ def dust_temperature(temp_radmc3d, rchem, zchem, d, theta):
     """Remap multi-species RADMC3D dust temperatures onto the Nautilus grid.
 
     Converts temperatures from the RADMC3D spherical grid to the Nautilus
-    cylindrical grid via nearest-neighbor lookup, where `zchem` provides
+    cylindrical grid via bilinear interpolation, where `zchem` provides
     physical heights per radius. Vertical profiles are smoothed with a
     5-point moving average.
 
@@ -242,45 +255,40 @@ def dust_temperature(temp_radmc3d, rchem, zchem, d, theta):
         ``(nbspecies, nrchem, nzchem)``, in K.
     """
     nbspecies, nz, ny, nx = temp_radmc3d.shape
+    nrchem = len(rchem)
+    nzchem = zchem.shape[1]
 
     d_cm = d * autocm  # convert RADMC3D grid from au to cm
 
-    temp_naut = np.ones((nbspecies, len(rchem), len(zchem[0, :])))
-    temp_naut_smooth = np.ones((nbspecies, len(rchem), len(zchem[0, :])))
+    # Build query points: convert cylindrical (rchem, zchem) -> spherical (d_pt, theta_pt)
+    d_pts = np.sqrt(rchem[:, None]**2 + zchem**2)            # (nrchem, nzchem)
+    theta_pts = np.arccos(np.clip(zchem / d_pts, -1, 1))     # (nrchem, nzchem)
+
+    # Clamp query points to the RADMC3D grid range
+    d_pts = np.clip(d_pts, d_cm[0], d_cm[-1])
+    theta_pts = np.clip(theta_pts, theta[0], theta[-1])
+
+    # Stack into (N, 2) array for the interpolator
+    query = np.column_stack([d_pts.ravel(), theta_pts.ravel()])
+
+    temp_naut = np.ones((nbspecies, nrchem, nzchem))
+    temp_naut_smooth = np.ones((nbspecies, nrchem, nzchem))
 
     for size_id in range(nbspecies):
-        for idx, r in enumerate(rchem):
-            for idz, z in enumerate(zchem[idx, :]):
-                d_pt = np.sqrt(r**2 + z**2)  #convert from cartesian to spherical
-                theta_pt = np.arccos(z/d_pt) #convert from cartesian to spherical
-                closest_d = min(enumerate(d_cm), key=lambda x: abs(x[1]-d_pt)) #find closest grid point
-                closest_t = min(enumerate(theta), key=lambda x: abs(x[1]-theta_pt)) #find closest grid point
-                temp_naut[size_id, idx, idz] = temp_radmc3d[size_id, 0, closest_t[0], closest_d[0]] 
+        data_2d = temp_radmc3d[size_id, 0, :, :]  # (ntheta, nr)
+        interp = RegularGridInterpolator(
+            (d_cm, theta), data_2d.T, method='linear', bounds_error=False, fill_value=None
+        )
+        temp_naut[size_id] = interp(query).reshape(nrchem, nzchem)
 
     #SMOOTHING TEMPERATURE PROFILE
-    for idx in range(len(rchem)):
+    for idx in range(nrchem):
         for size_id in range(nbspecies):
-            temp_naut_smooth[size_id, idx, :] = moving_average(temp_naut[size_id, idx, :], 5) #average the values over a rolling window of 5 points.
+            temp_naut_smooth[size_id, idx, :] = moving_average(temp_naut[size_id, idx, :], 5)
     temp_naut_smooth[:, :, 0:2] = temp_naut[:, :, 0:2]  #clean the boundary effects
-    temp_naut_smooth[:, :, -2:] = temp_naut[:, :, -2:] 
-    
+    temp_naut_smooth[:, :, -2:] = temp_naut[:, :, -2:]
 
-    # # #--------------------------------
-    # import matplotlib.pyplot as plt
-    # from matplotlib.colors import LogNorm
-    # fig = plt.figure(figsize=(10, 8.))
-    # ax = fig.add_subplot(111)
-    # plt.xlabel(r'r', fontsize = 17)
-    # plt.ylabel(r'z', fontsize = 17, labelpad=-7.4)
-    # zz, rr = np.meshgrid(zchem, rchem) #inverse r,z because dim is (len(r), len(z))
-    # t = plt.pcolormesh(rr/autocm, zz/autocm, temp_naut_smooth[0,:,:], cmap='gnuplot2', shading='auto', vmin=5, vmax=80, rasterized=True)
-    # #t = plt.contourf(rr/autocm, zz/autocm, dens_naut[0, :,:], levels=[0.1,1,8,10,20,30,40,50,60, 70, 80], cmap='jet', rasterized=True)
-    # clr = plt.colorbar(t)
-    # plt.show()
-    # # #-----------------------------------   
-
-
-    return temp_naut_smooth 
+    return temp_naut_smooth
 
 def dust_temperature_single(temp_radmc3d, rchem, zchem, d, theta):
     """Remap single-species RADMC3D dust temperature onto the Nautilus grid.

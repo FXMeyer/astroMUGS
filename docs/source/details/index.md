@@ -15,6 +15,7 @@ A detailed description of all classes, methods, and modules.
 grid
 disk
 model
+inputs
 ```
 
 ```{toctree}

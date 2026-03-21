@@ -32,14 +32,17 @@ The gas surface density follows:
 
    \Sigma_g(r) = \Sigma_0 \left(\frac{r}{r_0}\right)^{-p} \exp\left[-\left(\frac{r}{r_c}\right)^{2-p}\right]
 
-Dust settling reduces the scale height of larger grains relative to the gas:
+Following the prescription by `Cuzzi et al. (1993) <https://ui.adsabs.harvard.edu/abs/1993Icar..106..102C/abstract>`_,
+`Youdin & Lithwick. (2007) <https://ui.adsabs.harvard.edu/abs/2007Icar..192..588Y/abstract>`_,
+`Dong et al. (2015) <https://ui.adsabs.harvard.edu/abs/2015ApJ...809...93D>`_, dust settling reduces the scale height of larger grains relative to the gas:
 
 .. math::
 
-   H_d(a, r) = H_g(r) \cdot \min\left(1,\; \sqrt{\frac{\alpha}{\mathrm{St}(a, r)}}\right)
+   H_d(a, r) = H_g(r) \frac{1}{\sqrt{1 + T_{s,mid} \frac{S_c}{\alpha}}}
 
-where :math:`\mathrm{St}` is the Stokes number and :math:`\alpha` is the turbulence parameter.
+where :math:`\mathrm{T_{s,mid}}` is the dimensionless stopping time in the midplane,  :math:`\alpha` is the turbulence parameter, and :math:`S_c` is the Schmidt number.
 
+In params.disk, :math:`\alpha` and :math:`\S_c` correspond to ``alpha`` and ``schmidtnumber``, respectively.
 
 Vertical temperature structure
 -------------------------------

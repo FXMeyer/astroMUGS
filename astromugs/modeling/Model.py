@@ -705,7 +705,7 @@ class Model:
         if coupling_dens == True:
             n_dust, n_gas = nautilus.coupling.dust_density(dtogas, rho_m, a, dust_density, self.grid.rchem*autocm, self.grid.zchem*autocm, self.grid.r, self.grid.theta)
 
-            # If custom sigma, override n_gas with gas density from the custom file
+            # If custom sigma, override n_gas with gas density from the custom file, because the n_gas is derived from dtogas in the coupling, which is wrong if sigma_gas is custom.
             if self.params.disk.sigma_compute == 'custom' and len(self.grid.hg_chem) == 0:
                 r_custom, _, siggas_table = custom_io.surfacedensities(self.params.disk.sigma_path)
                 temp_disk = Disk(params=self.params.disk, dust=self.grid.dust[0])

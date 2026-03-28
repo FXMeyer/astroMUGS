@@ -813,10 +813,11 @@ def static(path, dist, gas_density,
     avnhfact = avnh_fact
     rgrain = r_grain*1e-4*np.ones(len(dist))
     inv_ab = nh/np.maximum(dust_density, min_dust_density)
-    uvf = uvfactor#/10
-    # Cap UV where density is at the floor
+    uvf = uvfactor
+    # Cap UV where density is at the floor to avoid stiff chemistry regimes
+    uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, 10.0), uvf)
+    # Additionally cap UV globally if max_uv is set
     if max_uv is not None:
-        #uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, max_uv), uvf)
         uvf = np.minimum(uvf, max_uv)
 
     static_array = np.stack((distance, nh, Tgas, avz, diff_coef, Tdust, inv_ab, avnhfact, rgrain, uvf), axis=-1)

@@ -23,12 +23,12 @@ Nautilus can encounter convergence issues when placed in extreme physical condit
 For example, a very strong UV field with little attenuation can cause the chemical computation
 to fail or make the run extremely long.
 
+Nautilus was initially designed for gas-grain simulations in the interstellar medium.
 Protoplanetary disk models are particularly prone to pushing Nautilus into stiff chemistry
 regimes, especially when post-processing hydrodynamical simulations. Many such simulations
 — whether computed from a single core collapse or from a 1-D surface density profile —
 can produce extreme conditions in the disk upper atmosphere: very low gas densities, strong
-UV fields, and negligible visual extinction. Nautilus is not designed for these environments,
-which are better suited for PDR codes.
+UV fields, and negligible visual extinction. Nautilus is not designed for these environments.
 
 Here are examples where Nautilus will struggle to converge:
 
@@ -36,7 +36,9 @@ Here are examples where Nautilus will struggle to converge:
 - Near-balanced UV shielding: when the UV flux and :math:`A_V` partially cancel, small abundance changes shift the shielding, which shifts the photodissociation rates, which shifts the abundances — a feedback loop that prevents convergence.
 
 To mitigate these issues, astroMUGS provides floor and ceiling parameters (``min_gas_density``, ``min_av``, ``max_uv``)
-that clamp physical quantities to user-defined bounds. These can be passed as keyword arguments to ``write_nautilus()``.
+that clamp physical quantities to user-defined bounds. These can be passed as keyword arguments to ``write_nautilus()``. 
+Applying these bounds should not impact the results of your simulations, because they typically apply to regions of your model that  
+don't correspond to observed physical environments in stellar formation regions and/or that you are not interested in (very high altitudes, very large/small radii, etc.).  
 
 .. warning::
 

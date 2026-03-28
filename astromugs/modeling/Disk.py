@@ -1,11 +1,3 @@
-"""
-_____________________________________________________________________________________________________________
-file name: Disk
-last update: Dec 2021
-language: PYTHON 3.8
-short description:  Model of a static flared disk adapted for RT and chemistry simulations
-_____________________________________________________________________________________________________________
-"""
 import os
 import sys
 import inspect

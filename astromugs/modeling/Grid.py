@@ -1,15 +1,3 @@
-"""
-_____________________________________________________________________________________________________________
-file name: Grid
-@author: P.Sheehan. Adapted by S. Gavino for chemistry codes.
-last update: Aug 2022
-language: PYTHON 3.8
-short description:  class Grid for young stellar objects modeling. 
-_____________________________________________________________________________________________________________
-"""
-
-
-
 from __future__ import annotations
 
 import numpy as np
@@ -441,13 +429,6 @@ class Grid:
 
             #dz = np.tan(np.pi/nbthetas)*self.rchem #0.0175 is pi/number of thetas.
 
-            # import matplotlib.pyplot as plt
-            # fig = plt.figure(figsize=(8, 8.))
-            # ax = fig.add_subplot(111)
-            # ax.plot(self.rchem, zmax)
-            # plt.xlim(0, 5005)
-            # plt.ylim(0, 5005)
-            # #plt.show()
 
     def set_wavelength_grid(self, log=True):
         """Build the wavelength grid used by the radiative transfer.

@@ -16,6 +16,7 @@ from astromugs.utils import custom as custom_io
 from astromugs.constants.constants import autocm, M_sun, R_sun, c, amu, mu, black_body
 from astromugs.modeling.InterstellarRadFields import InterstellarRadFields
 
+import xarray as xr
 import matplotlib.pyplot as plt
 
 
@@ -57,6 +58,7 @@ class Model:
         self.thermalpath = 'thermal/'
         self.chempath = 'chemistry/'
         self.radmc3d_cmd = 'radmc3d' #in case the user wants to point to a specific radmc3d
+        self.nmgc_cmd = 'nmgc'       #in case the user wants to point to a specific nmgc binary
         self.grid = Grid(params=self.params.disk, wave=self.thermalparams.wave)
         self.nautilus = nautilus
         
@@ -318,6 +320,66 @@ class Model:
             Additional keyword arguments (currently unused).
         """
         radmc3d.run.thermal(verbose=verbose, timelimit=timelimit, nice=nice, thermpath=self.thermalpath, radmc3d_cmd=self.radmc3d_cmd)
+
+
+    def run_chemistry(self, verbose=True, timelimit=None):
+        """Run the NMGC gas-grain chemistry simulation.
+
+        Calls ``nmgc run`` in ``self.chempath``, which must already contain
+        all required NMGC input files. Set ``self.nmgc_cmd`` beforehand if
+        the ``nmgc`` binary is not on PATH.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+            If True, NMGC output streams to the terminal. If False, it is
+            redirected to ``<chempath>/nmgc.out``. Default is True.
+        timelimit : float or None, optional
+            Timeout in seconds. None means no timeout. Default is None.
+        """
+        nautilus.run.run(chempath=self.chempath, nmgc_cmd=self.nmgc_cmd,
+                         verbose=verbose, timelimit=timelimit)
+
+
+    def read_chemistry(self, spatial_resolution=1):
+        """Read NMGC binary output and store results on the model.
+
+        Reads ``abundances.out`` from ``self.chempath`` and stores the
+        result as ``self.chemistry``. Must be called after
+        ``run_chemistry()`` or whenever a valid ``abundances.out`` exists
+        in ``self.chempath``.
+
+        Parameters
+        ----------
+        spatial_resolution : int, optional
+            Number of spatial grid points (default 1 for 0D per-cell runs).
+
+        Sets
+        ----
+        self.chemistry : dict with keys:
+
+        - ``time`` : ndarray, shape (nb_timesteps,) [s]
+        - ``gas_temperature`` : ndarray, shape (nb_timesteps, spatial_resolution) [K]
+        - ``dust_temperature`` : ndarray, shape (nb_timesteps, spatial_resolution) [K]
+        - ``H_number_density`` : ndarray, shape (nb_timesteps, spatial_resolution) [cm-3]
+        - ``visual_extinction`` : ndarray, shape (nb_timesteps, spatial_resolution) [mag]
+        - ``X_ionisation_rate`` : ndarray, shape (nb_timesteps,) [s-1]
+        - ``abundances`` : ndarray, shape (nb_timesteps, nb_species, spatial_resolution)
+        """
+        self.chemistry = nautilus.read.abundances_binary(
+            os.path.join(self.chempath, 'abundances.out'),
+            spatial_resolution=spatial_resolution
+        )
+        species = nautilus.read.species_names(self.chempath)
+        self.chemistry['species'] = species
+        self.chemistry['abundances'] = xr.DataArray(
+            self.chemistry['abundances'],
+            dims=['time', 'species', 'spatial'],
+            coords={
+                'time':    self.chemistry['time'],
+                'species': species,
+            }
+        )
 
 
     def run_localfield_radmc3d(self, nphot_mono=None, verbose=True, timelimit=7200):

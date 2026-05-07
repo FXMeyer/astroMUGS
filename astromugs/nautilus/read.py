@@ -130,6 +130,40 @@ def network_species(chempath, radius):
     return ab_list
 
 
+def species_names(path):
+    """Read the ordered species list from NMGC's species.out file.
+
+    ``species.out`` is written by NMGC at the start of every run and
+    records the exact order of the internal ``species_name`` array —
+    gas species first (in ``gas_species.in`` order), then grain/surface
+    species (in ``grain_species.in`` order). This order matches the
+    second axis of the ``abundances.out`` binary output.
+
+    Parameters
+    ----------
+    path : str
+        Path to the directory containing ``species.out`` (i.e. the
+        NMGC working / chemistry directory).
+
+    Returns
+    -------
+    list of str
+        Species names in the same order as the abundances array axis.
+    """
+    names = []
+    with open(os.path.join(path, 'species.out'), 'r') as f:
+        for line in f:
+            # Format: (5(I4,")",1X,A11,1X)) → "   1) H              2) H+    ..."
+            # Splitting on ")" gives: ["   1", " H         2", " H+    3", ..., " NAME  \n"]
+            # parts[0] has only the first index (no name yet); parts[1:] each start with a name.
+            parts = line.split(')')
+            for part in parts[1:]:
+                tokens = part.split()
+                if tokens:
+                    names.append(tokens[0])
+    return names
+
+
 def abundances_binary(path, spatial_resolution=1):
     """Read the NMGC binary abundance output file.
 

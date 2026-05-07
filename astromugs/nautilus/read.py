@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.io import FortranFile
 
 
 def grid(radlist, nb_sizes, itime, species, chempath):
@@ -127,6 +128,127 @@ def network_species(chempath, radius):
     ]
 
     return ab_list
+
+
+def abundances_binary(path, spatial_resolution=1):
+    """Read the NMGC binary abundance output file.
+
+    Reads ``abundances.out`` produced by NMGC when compiled with the
+    single-file append output format. All timesteps are stored as
+    sequential Fortran unformatted records; ``nb_species`` and
+    ``nb_timesteps`` are inferred automatically from the file size.
+
+    Each timestep contains three records:
+
+    1. ``current_time`` — scalar float64 [seconds]
+    2. Physical state — ``(4 * spatial_resolution + 1)`` float64 values:
+       gas temperature, dust temperature (grain 1), H number density,
+       visual extinction (each of length ``spatial_resolution``), then
+       the X-ray ionisation rate (scalar).
+    3. Abundances — ``nb_species * spatial_resolution`` float64 values
+       in Fortran column-major order.
+
+    Parameters
+    ----------
+    path : str
+        Path to the ``abundances.out`` binary file.
+    spatial_resolution : int, optional
+        Number of spatial grid points (default 1 for 0D per-cell runs).
+
+    Returns
+    -------
+    dict with keys:
+
+    - ``time`` : ndarray, shape (nb_timesteps,) — time in seconds
+    - ``gas_temperature`` : ndarray, shape (nb_timesteps, spatial_resolution) [K]
+    - ``dust_temperature`` : ndarray, shape (nb_timesteps, spatial_resolution) [K]
+    - ``H_number_density`` : ndarray, shape (nb_timesteps, spatial_resolution) [cm-3]
+    - ``visual_extinction`` : ndarray, shape (nb_timesteps, spatial_resolution) [mag]
+    - ``X_ionisation_rate`` : ndarray, shape (nb_timesteps,) [s-1]
+    - ``abundances`` : ndarray, shape (nb_timesteps, nb_species, spatial_resolution)
+    """
+    R = spatial_resolution
+
+    # Auto-detect nb_species and nb_timesteps by reading the first timestep
+    with FortranFile(path, 'r') as f:
+        f.read_reals(dtype=np.float64)          # time
+        phys0 = f.read_reals(dtype=np.float64)  # physical state
+        ab0   = f.read_reals(dtype=np.float64)  # abundances
+
+    nb_phys    = len(phys0)              # 4*R + 1
+    nb_species = len(ab0) // R
+
+    # Bytes per timestep: each Fortran record = 4-byte marker + data + 4-byte marker
+    bytes_per_ts = (
+        (4 + 1           * 8 + 4) +   # time record
+        (4 + nb_phys     * 8 + 4) +   # physical state record
+        (4 + nb_species * R * 8 + 4)  # abundances record
+    )
+    nb_timesteps = os.path.getsize(path) // bytes_per_ts
+
+    # Allocate output arrays
+    times    = np.empty(nb_timesteps)
+    phys_all = np.empty((nb_timesteps, nb_phys))
+    ab_all   = np.empty((nb_timesteps, nb_species, R))
+
+    with FortranFile(path, 'r') as f:
+        for i in range(nb_timesteps):
+            times[i]    = f.read_reals(dtype=np.float64)[0]
+            phys_all[i] = f.read_reals(dtype=np.float64)
+            ab_all[i]   = f.read_reals(dtype=np.float64).reshape(nb_species, R, order='F')
+
+    return {
+        'time':             times,
+        'gas_temperature':  phys_all[:, :R],
+        'dust_temperature': phys_all[:, R:2*R],
+        'H_number_density': phys_all[:, 2*R:3*R],
+        'visual_extinction':phys_all[:, 3*R:4*R],
+        'X_ionisation_rate':phys_all[:, -1],
+        'abundances':       ab_all,
+    }
+
+
+def rates_binary(path, spatial_resolution=1):
+    """Read the NMGC binary reaction rates output file.
+
+    Reads ``rates.out`` produced by NMGC. All timesteps are appended
+    sequentially; ``nb_reactions`` and ``nb_timesteps`` are inferred
+    from the file size.
+
+    Each timestep contains one record: the ``reaction_rates_1D`` array
+    of shape ``(spatial_resolution, nb_reactions)`` in Fortran
+    column-major order.
+
+    Parameters
+    ----------
+    path : str
+        Path to the ``rates.out`` binary file.
+    spatial_resolution : int, optional
+        Number of spatial grid points (default 1 for 0D per-cell runs).
+
+    Returns
+    -------
+    ndarray, shape (nb_timesteps, spatial_resolution, nb_reactions)
+        Reaction rates for all timesteps.
+    """
+    R = spatial_resolution
+
+    # Auto-detect nb_reactions from the first record
+    with FortranFile(path, 'r') as f:
+        rec0 = f.read_reals(dtype=np.float64)
+
+    nb_reactions  = len(rec0) // R
+    bytes_per_ts  = 4 + R * nb_reactions * 8 + 4
+    nb_timesteps  = os.path.getsize(path) // bytes_per_ts
+
+    rates = np.empty((nb_timesteps, R, nb_reactions))
+
+    with FortranFile(path, 'r') as f:
+        for i in range(nb_timesteps):
+            rates[i] = f.read_reals(dtype=np.float64).reshape(R, nb_reactions, order='F')
+
+    return rates
+
 
 # def abundance(path, itime=47, species='CO'):
 #     chemmodel = pd.read_table(path + 'disk_t{}.dat'.format(str(itime)), sep=" ", engine='python')

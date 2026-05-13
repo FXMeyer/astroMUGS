@@ -1,27 +1,22 @@
-import sys 
-import os 
+import sys
+import os
 import inspect
 import numpy as np
 
-#from astromugs.utils.struct import StructureParams
-from astromugs.modeling.Model import Model
+from astromugs.pipeline.Pipeline import Pipeline
 from astromugs.modeling.Star import Star
 from astromugs.modeling.Disk import Disk
 from astromugs.modeling.Envelope import Envelope
 from astromugs.modeling.InterstellarRadFields import InterstellarRadFields
 from astromugs.constants.constants import autocm, M_sun, R_sun, L_sun
 
-#currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-#parentdir = os.path.dirname(currentdir)
-#sys.path.insert(0,parentdir) 
 
-
-class Interface(Model):
+class Interface(Pipeline):
     """High-level interface for assembling radiative transfer models.
 
     Provides methods to add physical components (star, disk, envelope,
     interstellar radiation field) and chemical models to a grid, building
-    on the base ``Model`` class.
+    on the base ``Pipeline`` class.
     """
 
     #def __init__(self):
@@ -123,7 +118,7 @@ class Interface(Model):
             parameters (e.g., ``mdot``, ``alpha``).
         """
         # Create a copy of the defaults
-        params = self.params.disk     
+        params = self.params.disk
         # Apply overrides given by user
         for key, val in kwargs.items():
             setattr(params, key, val)
@@ -164,21 +159,6 @@ class Interface(Model):
         self.grid.add_gastemperature_chem(self.chemdisk.temp_altitude(self.grid.rchem, self.grid.zchem))
         self.grid.add_hg_chem(self.chemdisk.scaleheight(self.grid.rchem))
         self.grid.add_avz(self.chemdisk.av_z(self.grid.lam, self.grid.dustdensity_chem[0], self.grid.rchem, self.grid.zchem))
-
-    # def add_envelope(self, dust=None, **kwargs):
-    #     # Create a copy of the defaults
-    #     params = EnvelopeParams()
-
-    #     # Apply overrides given by user
-    #     for key, val in kwargs.items():
-    #         setattr(params, key, val)
-
-    #     self.envelope = Envelope(params=params, dust=dust)
-
-    #     if self.grid.dust:
-    #         self.grid.add_dustdensity(
-    #             self.envelope.density_d(self.grid.r, self.grid.theta, self.grid.phi)
-    #         )
 
 
     def add_envelope(self, dust=None, **kwargs):
@@ -240,8 +220,6 @@ class Interface(Model):
         RuntimeError
             For any other errors encountered during processing.
         """
-        # if structure_type != "1D":
-        #     raise ValueError(f"Unsupported structure type: {structure_type}. Only '1D' is supported.")
 
         if reader is None:
             reader = self.nautilus.read  # Default to the current reader if none is provided
@@ -263,8 +241,3 @@ class Interface(Model):
             raise KeyError(f"Missing required parameter in chemistry data: {e}")
         except Exception as e:
             raise RuntimeError(f"An error occurred while adding the chemistry model: {e}")
-        
-
-
-
-       

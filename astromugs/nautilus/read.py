@@ -164,13 +164,14 @@ def species_names(path):
     return names
 
 
-def abundances_binary(path, spatial_resolution=1):
+def abundances_binary(path):
     """Read the NMGC binary abundance output file.
 
     Reads ``abundances.out`` produced by NMGC when compiled with the
     single-file append output format. All timesteps are stored as
-    sequential Fortran unformatted records; ``nb_species`` and
-    ``nb_timesteps`` are inferred automatically from the file size.
+    sequential Fortran unformatted records. ``spatial_resolution``,
+    ``nb_species``, and ``nb_timesteps`` are all inferred automatically
+    from the file contents and size — no user input required.
 
     Each timestep contains three records:
 
@@ -186,8 +187,6 @@ def abundances_binary(path, spatial_resolution=1):
     ----------
     path : str
         Path to the ``abundances.out`` binary file.
-    spatial_resolution : int, optional
-        Number of spatial grid points (default 1 for 0D per-cell runs).
 
     Returns
     -------
@@ -201,15 +200,16 @@ def abundances_binary(path, spatial_resolution=1):
     - ``X_ionisation_rate`` : ndarray, shape (nb_timesteps,) [s-1]
     - ``abundances`` : ndarray, shape (nb_timesteps, nb_species, spatial_resolution)
     """
-    R = spatial_resolution
-
-    # Auto-detect nb_species and nb_timesteps by reading the first timestep
+    # Auto-detect spatial_resolution, nb_species, and nb_timesteps
+    # from the first timestep. Record 2 always has 4*R + 1 values by
+    # construction, so R = (len(phys0) - 1) // 4 is unambiguous.
     with FortranFile(path, 'r') as f:
         f.read_reals(dtype=np.float64)          # time
         phys0 = f.read_reals(dtype=np.float64)  # physical state
         ab0   = f.read_reals(dtype=np.float64)  # abundances
 
-    nb_phys    = len(phys0)              # 4*R + 1
+    R          = (len(phys0) - 1) // 4
+    nb_phys    = len(phys0)
     nb_species = len(ab0) // R
 
     # Bytes per timestep: each Fortran record = 4-byte marker + data + 4-byte marker

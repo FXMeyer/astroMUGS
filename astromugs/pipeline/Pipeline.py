@@ -1,13 +1,13 @@
 import glob
-import os 
+import os
 import sys
-import shutil 
+import shutil
 import numpy as np
 
 
 from astromugs import radmc3d
 from astromugs import nautilus
-from astromugs.modeling.Grid import Grid
+from astromugs.pipeline.Grid import Grid
 from astromugs.modeling.Disk import Disk
 from astromugs.utils.struct import StructureParams
 from astromugs.utils.thermal import ThermalParams
@@ -20,7 +20,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 
 
-class Model:
+class Pipeline:
     """Main user-facing class for setting up and running disk models.
 
     Orchestrates the full modeling pipeline: dust continuum radiative transfer
@@ -52,7 +52,7 @@ class Model:
     """
 
     def __init__(self):
-        """Initialize the Model with default parameters, grid, and paths."""
+        """Initialize the Pipeline with default parameters, grid, and paths."""
         self.params = StructureParams()
         self.thermalparams = ThermalParams()
         self.thermalpath = 'thermal/'
@@ -61,7 +61,7 @@ class Model:
         self.nmgc_cmd = 'nmgc'       #in case the user wants to point to a specific nmgc binary
         self.grid = Grid(params=self.params.disk, wave=self.thermalparams.wave)
         self.nautilus = nautilus
-        
+
 
     def run_continuum(self, write_control=False, **keywords):
         """Run dust continuum radiative transfer and compute area-weighted temperature.
@@ -94,7 +94,7 @@ class Model:
 
 
         # THIS SECTION READS THE THERMAL FILES IF THE FILES EXIST.
-        # IF THE FILES DO NOT EXIST, A WARNING IS PRINTED BUT THE CODE CONTINUES. ERRORS CAN BE RAISED. 
+        # IF THE FILES DO NOT EXIST, A WARNING IS PRINTED BUT THE CODE CONTINUES. ERRORS CAN BE RAISED.
         # WHY DOES THE CODE CONTINUE? BECAUSE SOMETIMES THE USER MAY WANT TO RUN THE CHEMISTRY WITHOUT HAVING A DUST STRUCTURE (E.G. IF THEY WANT TO DERIVE DUST_DENSITY.INP FROM AN EXISTING CHEMISTRY MODEL).
         # ---- READ SECTION ----
         densityfile = thermpath + "dust_density.inp"
@@ -115,21 +115,21 @@ class Model:
 
                 self.grid.temperature = radmc3d.read.dust_temperature(thermpath)
                 if len(self.grid.temperature) > 0:
-                    self.grid.temperature[0] = np.reshape(self.grid.temperature[0], (nbspecies, nz, ny, nx)) 
-        
+                    self.grid.temperature[0] = np.reshape(self.grid.temperature[0], (nbspecies, nz, ny, nx))
+
                     if nbspecies > 1:
-                        
+
                         a = []
                         dustmass = []
-                        
+
                         for istruc in range(0, len(self.grid.dust)): # create a loop in order to gather all grain sizes into one single array that will be used to compute the area-weighted temperature Ta.
 
-                            dustmodel = self.grid.dust[istruc] 
+                            dustmodel = self.grid.dust[istruc]
                             #dustmass = dustmodel.grainmass() # gram
                             sizes = dustmodel.sizes()
                             #a = sizes[-1]*1e-4 # cm
                             a.append(sizes[-1]*1e-4) # cm
-                            
+
                             dustmass.append(dustmodel.grainmass()) # gram
                         a = np.hstack(a) # in order to get a numpy list of all sizes no matter how many structures there are.
                         dustmass = np.hstack(dustmass)
@@ -268,7 +268,7 @@ class Model:
             print('create dust_temperature.inp')
 
 
-            
+
     def run_localfield(self, nphot_mono=None, write_mcmono=False, run=True, **keywords):
         """Compute the local mean radiation field with RADMC-3D monochromatic Monte Carlo.
 
@@ -292,7 +292,7 @@ class Model:
         """
 
         self.write_continuum(mcmono=write_mcmono, **keywords)
-        
+
         if run == True:
             self.run_localfield_radmc3d(nphot_mono=nphot_mono)
 
@@ -341,18 +341,14 @@ class Model:
                          verbose=verbose, timelimit=timelimit)
 
 
-    def read_chemistry(self, spatial_resolution=1):
+    def read_chemistry(self):
         """Read NMGC binary output and store results on the model.
 
         Reads ``abundances.out`` from ``self.chempath`` and stores the
         result as ``self.chemistry``. Must be called after
         ``run_chemistry()`` or whenever a valid ``abundances.out`` exists
-        in ``self.chempath``.
-
-        Parameters
-        ----------
-        spatial_resolution : int, optional
-            Number of spatial grid points (default 1 for 0D per-cell runs).
+        in ``self.chempath``. Works for both 0D and 1D runs — spatial
+        resolution is detected automatically from the file.
 
         Sets
         ----
@@ -364,11 +360,10 @@ class Model:
         - ``H_number_density`` : ndarray, shape (nb_timesteps, spatial_resolution) [cm-3]
         - ``visual_extinction`` : ndarray, shape (nb_timesteps, spatial_resolution) [mag]
         - ``X_ionisation_rate`` : ndarray, shape (nb_timesteps,) [s-1]
-        - ``abundances`` : ndarray, shape (nb_timesteps, nb_species, spatial_resolution)
+        - ``abundances`` : xarray.DataArray, shape (nb_timesteps, nb_species, spatial_resolution)
         """
         self.chemistry = nautilus.read.abundances_binary(
-            os.path.join(self.chempath, 'abundances.out'),
-            spatial_resolution=spatial_resolution
+            os.path.join(self.chempath, 'abundances.out')
         )
         species = nautilus.read.species_names(self.chempath)
         self.chemistry['species'] = species
@@ -518,7 +513,7 @@ class Model:
         if dens == False and grid == False and control == False and opac == False and stars == False and wave == False:
             print('\nWARNING: no RADMC3D file are created.\n')
             print('----------------------------\n')
-                
+
     def write_line(self, control=False, line=False, gasvelocity=False, gastemp=False, microturb=False, line_format='leiden', species='CO', star_mass=1):
         """Write RADMC-3D input files for line radiative transfer.
 
@@ -565,7 +560,7 @@ class Model:
         if gasvelocity == True:
             print('\nWriting gas_velocity.inp:')
             print('----------------------------')
-            radmc3d.write.gas_velocity(star_mass=star_mass, r=self.grid.r, theta=self.grid.theta, phi=self.grid.phi, object="disk", thermpath=thermpath)   
+            radmc3d.write.gas_velocity(star_mass=star_mass, r=self.grid.r, theta=self.grid.theta, phi=self.grid.phi, object="disk", thermpath=thermpath)
 
 
     def write_nautilus(self, sizes=np.array([[0.1]]),
@@ -697,18 +692,18 @@ class Model:
         nbspecies = int(len(dust_density[0])/(nx*ny*nz)) #get number of species
         dust_density = np.reshape(dust_density[0], (nbspecies, nz, ny, nx)) #reshape it
         dust_density[dust_density<=1e-100] = 1e-100 # get a minimum dust density in order to avoid absurd NaN issues.
-        
+
         nb_lam, lam, r_star, m_star, T_star, spectrum = radmc3d.read.stars(thermpath)  #read stars file.
         external = radmc3d.read.external_source(thermpath)  #read external_source.inp
         # define temperature
         self.grid.temperature = radmc3d.read.dust_temperature(thermpath)
         if len(self.grid.temperature) > 0:
-            self.grid.temperature[0] = np.reshape(self.grid.temperature[0], (nbspecies, nz, ny, nx)) 
+            self.grid.temperature[0] = np.reshape(self.grid.temperature[0], (nbspecies, nz, ny, nx))
 
             a = []
             dustmass = []
             for istruc in range(0, len(self.grid.dust)): # create a loop in order to gather all grain sizes into one single array that will be used to compute the area-weighted temperature Ta.
-                dustmodel = self.grid.dust[istruc] 
+                dustmodel = self.grid.dust[istruc]
                 sizes = dustmodel.sizes()
                 rho_m = dustmodel.rho_m
                 #a = sizes[-1]*1e-4 # cm
@@ -732,28 +727,14 @@ class Model:
             print('\nNo dust temperature file was found. If coupling_temp is True the chemistry model cannot be created.\n\n')
 
         nlam_mono, lam_mono, self.grid.localfield = radmc3d.read.localfield(thermpath)
-        lam_mono = 1e6*(c/lam_mono) #from Hz to microns. Should be same number as in mcmono_wavelength.inp. 
+        lam_mono = 1e6*(c/lam_mono) #from Hz to microns. Should be same number as in mcmono_wavelength.inp.
 
         isrf = InterstellarRadFields(cut=2.e-1, d78=True, vdb82=False) #calculate Draine isrf.
-        # isrf = isrf.create_isrf(lam_mono)
-        # print(isrf)
-        # # #--------------------------------
-        # import matplotlib.pyplot as plt
-        # from matplotlib.colors import LogNorm
-        # fig = plt.figure(figsize=(10, 8.))
-        # ax = fig.add_subplot(111)
-        # plt.xlabel(r'lamda', fontsize = 17)
-        # plt.ylabel(r'isrf', fontsize = 17, labelpad=-7.4)
-        # plt.semilogy(isrf[0], isrf[1], c='black')
-        # ax.set_ylim(1e-26, 1e-20)
-        # plt.show()
-        # # #-----------------------------------
-
 
 
         if len(self.grid.localfield) > 0:
             try:
-                self.grid.localfield = np.reshape(self.grid.localfield, (nlam_mono, nz, ny, nx)) 
+                self.grid.localfield = np.reshape(self.grid.localfield, (nlam_mono, nz, ny, nx))
             except IOError:
                 print('\nPlease, check consistency between the grid size and mean_intensity.out.\n')
                 sys.exit(1)
@@ -780,10 +761,10 @@ class Model:
            if not self.grid.temperature:
                print('coupling_temp==True: The file thermal/dust_temperature.dat is not present or is corrupted. Chemistry model cannot created.')
                sys.exit(1)
-           if len(self.grid.hg_chem) > 0:       
+           if len(self.grid.hg_chem) > 0:
                T_dust = nautilus.coupling.dust_temperature_disk(self.grid.temperature[0], self.grid.rchem*autocm, self.grid.zchem, self.grid.r, self.grid.theta, self.grid.hg_chem[0]) # dim(a, rchem, zchem)
                T_dust_single = nautilus.coupling.dust_temperature_single_disk(self.Ta, self.grid.rchem*autocm, self.grid.zchem, self.grid.r, self.grid.theta, self.grid.hg_chem[0])
-           else:       
+           else:
                T_dust = nautilus.coupling.dust_temperature(self.grid.temperature[0], self.grid.rchem*autocm, self.grid.zchem*autocm, self.grid.r, self.grid.theta) # dim(a, rchem, zchem)
                T_dust_single = nautilus.coupling.dust_temperature_single(self.Ta, self.grid.rchem*autocm, self.grid.zchem*autocm, self.grid.r, self.grid.theta)
         else:
@@ -809,24 +790,24 @@ class Model:
              print('Multi-grain mode: No\n') #if ngmc is False, Nautilus with a single grain bin is assumed to be used. This can be true even if the thermal model has multiple dust bins.
              print('Dust temperature structure: single or area-weigthed (dust parameters stored in 1D_static.dat).\n')
 
-        
+
         for idx, r in enumerate(self.grid.rchem):
             path = chempath + '/' + str(int(r)) + 'AU/'
-            os.makedirs(path, exist_ok=False) 
+            os.makedirs(path, exist_ok=False)
 
             #---temporary defining cavity to increase the Av in that area so we don't have convergence issue. This should be removed in the main branch.
             z0 = 200
             phi = (16*np.pi)/180
             zcav = z0*(r/(z0*np.tan(phi/2)))**1.55
 
-            
+
 
             ###!!!! maybe add a factor to account for the excess of UV in the protostar spectrum?
             if len(self.grid.hg_chem) > 0:
                 uvfactor = nautilus.write.uv_factordisk(uv_ref, ref_radius, r, self.grid.hg_chem[0][idx]/autocm)
             else:
                 uvfactor = nautilus.write.uv_factor(isrf, lam_mono, r_star, T_star, r*autocm, self.grid.zchem[idx,:]*autocm, external)
-            
+
             avnh_fact = nautilus.write.avnh_factor(nH_to_AV_conversion, dtogas, rsingle, self.grid.nz_chem)
 
             if temp_gas == 'dust':
@@ -895,12 +876,12 @@ class Model:
                                     min_av = min_av,
                                     max_uv=max_uv,
                                     rho_m=rho_m)
-            
-                if nbspecies > 1: 
+
+                if nbspecies > 1:
                     if len(self.grid.hg_chem) > 0:
                         nH = self.grid.gasdensity_chem[0][idx,:]
                         nd = self.grid.dustdensity_chem[0][:,idx,:]
-                    elif coupling_dens == True: 
+                    elif coupling_dens == True:
                         nH = n_gas[idx, :]
                         nd = n_dust[:, idx, :]
                     nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density, rho_m=rho_m)
@@ -912,7 +893,3 @@ class Model:
                 nautilus.write.network(path)
             if element == True:
                 nautilus.write.elements(path)
-            # if activ_energies == True:
-            #     nautilus.write.activ_energies(path)
-            # if surfaces == True:
-            #     nautilus.write.surfaces(path)

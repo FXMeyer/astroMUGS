@@ -2,8 +2,10 @@ import sys
 import os
 import inspect
 import numpy as np
+import xarray as xr
 
 from astromugs.pipeline.Pipeline import Pipeline
+from astromugs import nautilus
 from astromugs.modeling.Star import Star
 from astromugs.modeling.Disk import Disk
 from astromugs.modeling.Envelope import Envelope
@@ -193,51 +195,107 @@ class Interface(Pipeline):
             )
 
 
-    def add_chemmodel(self, chempath="chemistry/", itime=0, species='CO', reader=None):
-        """Load an existing chemistry model onto the grid.
+    def add_chemistry(self, chempath=None, itime=-1):
+        """Read chemistry output and store results on the model.
+
+        Auto-detects whether *chempath* is a single chemistry run (0-D or
+        single 1-D) or a disk model composed of multiple radial folders
+        ending with ``AU/``.
+
+        In **single mode**, ``self.chemistry`` is a dict with an xarray
+        ``abundances`` DataArray containing all species and timesteps.
+
+        In **disk mode**, ``self.chemistry`` is a dict keyed by radius
+        (int, in AU), where each value has the same structure.
+        ``self.grid.chemmodel`` is also populated so that
+        ``convert_nautilus2radmc()`` works out of the box.
 
         Parameters
         ----------
-        chempath : str, optional
-            Path to the chemistry model directory. Default is
-            ``'chemistry/'``.
+        chempath : str or None, optional
+            Path to the chemistry output directory. Defaults to
+            ``self.chempath``.
         itime : int, optional
-            Index of the time snapshot to use from the chemistry output.
-            Default is 0.
-        species : str, optional
-            Chemical species of interest (e.g., ``'CO'``, ``'H2O'``).
-            Default is ``'CO'``.
-        reader : object or None, optional
-            Reader responsible for parsing chemistry data. Defaults to
-            ``self.nautilus.read`` when None.
-
-        Raises
-        ------
-        FileNotFoundError
-            If required files are missing in *chempath*.
-        KeyError
-            If required parameters are missing in the chemistry data.
-        RuntimeError
-            For any other errors encountered during processing.
+            Timestep index used to build the grid-level chemistry model
+            (``self.grid.chemmodel``) for disk mode. Negative indices
+            follow NumPy convention (``-1`` = last timestep). Default
+            is ``-1``.
         """
+        if chempath is None:
+            chempath = self.chempath
 
-        if reader is None:
-            reader = self.nautilus.read  # Default to the current reader if none is provided
+        # Detect disk mode: look for subfolders ending with "AU"
+        au_folders = sorted(
+            [d for d in os.listdir(chempath)
+             if d.endswith('AU') and os.path.isdir(os.path.join(chempath, d))],
+            key=lambda x: int(x.replace('AU', ''))
+        )
 
-        try:
-            radii = reader.radii(chempath=chempath)
-            self.grid.add_existingchemradii(radii)
+        if au_folders:
+            self._read_chemistry_disk(chempath, au_folders, itime)
+        else:
+            self._read_chemistry_single(chempath)
 
-            parameters = reader.parameters(self.grid.chemradii, chempath=chempath)
-            if 'nb_grains_1D' not in parameters:
-                raise KeyError("The parameter 'nb_grains_1D' is missing in the chemistry parameters.")
-            self.grid.add_existingchemparam(parameters)
+    def _read_chemistry_single(self, chempath):
+        """Read a single chemistry folder (0-D or 1-D run)."""
+        self.chemistry = nautilus.read.abundances_binary(
+            os.path.join(chempath, 'abundances.out')
+        )
+        species_names = nautilus.read.species_names(chempath)
+        self.chemistry['species'] = species_names
+        self.chemistry['abundances'] = xr.DataArray(
+            self.chemistry['abundances'],
+            dims=['time', 'species', 'spatial'],
+            coords={
+                'time':    self.chemistry['time'],
+                'species': species_names,
+            }
+        )
 
-            grid = reader.grid(radlist=self.grid.chemradii, nb_sizes=int(parameters['nb_grains_1D']), itime=itime, species=species, chempath=chempath)
-            self.grid.add_existingchemmodel(grid, species)
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"Required file not found in {chempath}: {e}")
-        except KeyError as e:
-            raise KeyError(f"Missing required parameter in chemistry data: {e}")
-        except Exception as e:
-            raise RuntimeError(f"An error occurred while adding the chemistry model: {e}")
+    def _read_chemistry_disk(self, chempath, au_folders, itime):
+        """Read a disk chemistry model (multiple *AU/ subfolders)."""
+        radii = [int(d.replace('AU', '')) for d in au_folders]
+        self.grid.add_existingchemradii(radii)
+
+        # Read species names from the first radius folder
+        first_path = os.path.join(chempath, au_folders[0])
+        species_names = nautilus.read.species_names(first_path)
+
+        self.chemistry = {}
+
+        for radius, folder in zip(radii, au_folders):
+            folder_path = os.path.join(chempath, folder)
+
+            # Read binary output
+            chem = nautilus.read.abundances_binary(
+                os.path.join(folder_path, 'abundances.out')
+            )
+            chem['species'] = species_names
+            chem['abundances'] = xr.DataArray(
+                chem['abundances'],
+                dims=['time', 'species', 'spatial'],
+                coords={
+                    'time':    chem['time'],
+                    'species': species_names,
+                }
+            )
+            self.chemistry[radius] = chem
+
+            # Read vertical grid from 1D_static.dat
+            static_data = np.loadtxt(
+                os.path.join(folder_path, '1D_static.dat'), comments='!'
+            )
+            z = static_data[:, 0]
+
+            # Build self.grid.chemmodel for convert_nautilus2radmc
+            nH = chem['H_number_density'][itime]            # (spatial,)
+            abundances_t = chem['abundances'].isel(time=itime).values  # (nb_species, spatial)
+
+            for idx_sp, sp in enumerate(species_names):
+                if sp not in self.grid.chemmodel:
+                    self.grid.chemmodel[sp] = {}
+                self.grid.chemmodel[sp][radius] = {
+                    'z': z,
+                    'nH': nH,
+                    'numberdens_species': nH * abundances_t[idx_sp],
+                }

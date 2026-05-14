@@ -16,7 +16,6 @@ from astromugs.utils import custom as custom_io
 from astromugs.constants.constants import autocm, M_sun, R_sun, c, amu, mu, black_body
 from astromugs.modeling.InterstellarRadFields import InterstellarRadFields
 
-import xarray as xr
 import matplotlib.pyplot as plt
 
 
@@ -222,7 +221,7 @@ class Pipeline:
 
         Interpolates chemistry model results onto the radiative transfer grid
         and writes the corresponding RADMC-3D input files. The chemistry model
-        must first be attached via ``add_chemmodel()``. An ``amr_grid.inp``
+        must first be attached via ``add_chemistry()``. An ``amr_grid.inp``
         file must already exist (or the grid must be set) because the chemistry
         grid is typically at lower resolution than the RT grid and requires
         interpolation.
@@ -339,42 +338,6 @@ class Pipeline:
         """
         nautilus.run.run(chempath=self.chempath, nmgc_cmd=self.nmgc_cmd,
                          verbose=verbose, timelimit=timelimit)
-
-
-    def read_chemistry(self):
-        """Read NMGC binary output and store results on the model.
-
-        Reads ``abundances.out`` from ``self.chempath`` and stores the
-        result as ``self.chemistry``. Must be called after
-        ``run_chemistry()`` or whenever a valid ``abundances.out`` exists
-        in ``self.chempath``. Works for both 0D and 1D runs — spatial
-        resolution is detected automatically from the file.
-
-        Sets
-        ----
-        self.chemistry : dict with keys:
-
-        - ``time`` : ndarray, shape (nb_timesteps,) [s]
-        - ``gas_temperature`` : ndarray, shape (nb_timesteps, spatial_resolution) [K]
-        - ``dust_temperature`` : ndarray, shape (nb_timesteps, spatial_resolution) [K]
-        - ``H_number_density`` : ndarray, shape (nb_timesteps, spatial_resolution) [cm-3]
-        - ``visual_extinction`` : ndarray, shape (nb_timesteps, spatial_resolution) [mag]
-        - ``X_ionisation_rate`` : ndarray, shape (nb_timesteps,) [s-1]
-        - ``abundances`` : xarray.DataArray, shape (nb_timesteps, nb_species, spatial_resolution)
-        """
-        self.chemistry = nautilus.read.abundances_binary(
-            os.path.join(self.chempath, 'abundances.out')
-        )
-        species = nautilus.read.species_names(self.chempath)
-        self.chemistry['species'] = species
-        self.chemistry['abundances'] = xr.DataArray(
-            self.chemistry['abundances'],
-            dims=['time', 'species', 'spatial'],
-            coords={
-                'time':    self.chemistry['time'],
-                'species': species,
-            }
-        )
 
 
     def run_localfield_radmc3d(self, nphot_mono=None, verbose=True, timelimit=7200):

@@ -1,8 +1,0 @@
-name: astromugs
-dependencies:
-  - python>3.12
-  - numpy=2.2.2
-  - scipy
-  - matplotlib
-  - zarr
-  - xarray

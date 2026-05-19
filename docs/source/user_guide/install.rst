@@ -1,57 +1,50 @@
 Installation of astroMUGS
 ************
 
-How to obtain astroMUGS
-=================
 
-astroMUGS (new name of chemdiskpy) can be obtained either by cloning its Github repository or via pip.
-From a terminal, type::
-    
-      pip install -i https://test.pypi.org/simple/ astromugs
+How to obtain radprocess
+========================
 
-This will install the latest version. You can use astromugs from any directory. To install the package from the Github repository, go to a directory where you want to install the code, and type:: 
+Clone the GitHub repository, create a virtual environment, and install in
+editable mode::
+
+    git clone https://github.com/sachagavino/astroMUGS.git
+    cd astromugs
+    python -m venv .venv --prompt astromugs
+    source .venv/bin/activate
+    python -m pip install -e .
+
+This creates a virtual environment (``.venv/``) inside the ``astromugs/``
+directory, activates it, and installs radprocess with all its Python
+dependencies (numpy, scipy, zarr, matplotlib, Xarray, etc.).
+
+.. note::
+
+   Always use ``python -m pip`` instead of bare ``pip``. On some systems,
+   ``pip`` may point to a different Python environment than the one activated
+   by the venv, which leads to packages being installed in the wrong place.
 
 
-    git clone https://github.com/sachagavino/astromugs.git
+Every time you open a new terminal and want to use astromugs, you need to
+activate the environment first::
 
+    cd /path/to/radprocess
+    source .venv/bin/activate
 
-This will create a folder ``astromugs/``, which contains the full git repository. You can now access the package::
-
-
-    cd astromugs/
-
-
-To make sure you always use the latest version, you can type:: 
-
+To update your local copy later::
 
     git pull
-
-
-
-Requirements and environment
-=================
-
-It is strongly recommended to use a dedicated virtual environment to avoid conflicts with other packages. You can use ``conda`` to create a virtual environment. 
-The easiest way to do this is to use the provided ``environment.yml`` file. The name of the environment is ``astromugs`` by default, but you can change it in the ``environment.yml`` file before creating the environment.
-From the terminal, type::
-
-    conda env create -f environment.yml
-
-Verify that the environment is created properly::
-
-    conda env list
-
-If the name of the environment appears in the list, it means the environment has been created successfully. 
-
-You can now activate the new environment with::
-
-    conda activate astromugs
-
-Note that the next version of astroMUGS will use ``uv`` for installation. Keep up-to-date by checking the documentation. 
+    python -m pip install -e .
+    
+ 
 
 
 Running the code
 =================
 
-In a python script, you can import 
+In a python script or notebook, you can import the astromugs pipeline::
+
+    import astromugs.pipeline as pipeline
+
+
 

@@ -25,17 +25,23 @@ Ultimately, the pipeline will also include post-processing of multi-fluid MHD si
 [2]: https://zarr.dev/
 
 
-## Installation
+## Quick install
 
-- You can find the latest release from test PYPI (for now) [https://test.pypi.org/](https://test.pypi.org/):
+```bash
+git clone https://github.com/sachagavino/astroMUGS.git
+cd astromugs
+python -m pip install -e .
+```
 
-        pip install -i https://test.pypi.org/simple/ astromugs
 
+You can create an specific environment for astroMUGS:
 
-- Alternatively, you can clone the repository:
+```bash
+cd astromugs
+python -m venv .venv --prompt astromugs
+source .venv/bin/activate
 
-        git clone https://github.com/sachagavino/astroMUGS.git
-
+```
 
 ## Documentation
 A detailed documentation can be found [here][3]. 

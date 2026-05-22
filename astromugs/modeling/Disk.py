@@ -63,8 +63,17 @@ class Disk:
         for field in params.__dataclass_fields__:
             setattr(self, field, getattr(params, field))
 
+        # Pre-load custom temperature table if available
+        self._custom_r = None
+        self._custom_Tgas = None
+        if params.sigma_compute == 'custom' and params.sigma_path is not None:
+            r_custom, _, _, T_gas = custom.surfacedensities(params.sigma_path)
+            if T_gas is not None:
+                self._custom_r = r_custom
+                self._custom_Tgas = T_gas
+
     def scaleheight(self, r):
-        """Compute the gas scale height using a power-law profile.
+        """Compute the gas scale height.
 
         Parameters
         ----------
@@ -78,19 +87,30 @@ class Disk:
 
         Notes
         -----
-        The flaring exponent is derived as ``h_exp = 3/2 - q_exp/2``.
-        When ``q_exp = 3`` the disk is geometrically flat. The scale height
-        is computed from ``h0`` if provided, otherwise from ``tmidplan_ref``.
+        When a custom temperature profile is available (from the custom
+        surface density file), the scale height is computed directly from
+        ``H = sqrt(k_B T r^3 / (mu m_H G M_*))`` at each radius.
+        Otherwise, a power-law profile is used via ``h0`` or ``tmidplan_ref``.
         """
-        h_exp = (3./2.) - (self.params.q_exp/2.)
-        if self.params.h0 != None: 
-            hgas = self.params.h0*autocm*(r/(self.params.ref_radius))**h_exp
-        elif self.params.tmidplan_ref != None:
-            h0 = np.sqrt((kb*self.params.tmidplan_ref*(self.params.ref_radius*autocm)**3)/(mu*amu*Ggram*self.params.star_mass*M_sun))
-            self.params.h0 = h0/autocm
-            #h0 = h0/autocm
-            hgas = h0*(r/(self.params.ref_radius))**h_exp
+        r_arr = np.atleast_1d(r)
 
+        if self._custom_Tgas is not None:
+            # Interpolate T(r) from the custom table, then compute H(r) directly
+            T = self.temp_mid(r_arr)
+            hgas = np.sqrt((kb * T * (r_arr * autocm)**3) /
+                           (mu * amu * Ggram * self.params.star_mass * M_sun))
+        else:
+            h_exp = (3./2.) - (self.params.q_exp/2.)
+            if self.params.h0 != None: 
+                hgas = self.params.h0*autocm*(r_arr/(self.params.ref_radius))**h_exp
+            elif self.params.tmidplan_ref != None:
+                h0 = np.sqrt((kb*self.params.tmidplan_ref*(self.params.ref_radius*autocm)**3)/(mu*amu*Ggram*self.params.star_mass*M_sun))
+                self.params.h0 = h0/autocm
+                hgas = h0*(r_arr/(self.params.ref_radius))**h_exp
+
+        # Return scalar if input was scalar
+        if np.ndim(r) == 0:
+            return hgas.item() if hgas.size == 1 else hgas
         return hgas
 
 
@@ -108,7 +128,7 @@ class Disk:
             Gas surface density in g/cm^2.
         """
         if self.params.sigma_compute == 'custom':
-            r_custom, _, siggas_table = custom.surfacedensities(self.params.sigma_path)
+            r_custom, _, siggas_table, _ = custom.surfacedensities(self.params.sigma_path)
             r_flat = np.clip(r.ravel() if hasattr(r, 'ravel') else np.atleast_1d(r), r_custom[0], r_custom[-1])
             sigma_g = np.interp(r_flat, r_custom, siggas_table)
             if hasattr(r, 'shape'):
@@ -148,7 +168,20 @@ class Disk:
         -------
         float or ndarray
             Midplane temperature in K.
+
+        Notes
+        -----
+        When a custom temperature profile is loaded from the surface density
+        file, the temperature is interpolated from that table. Otherwise, the
+        analytic power law ``T = T_ref * (r/r_ref)^(-q)`` is used.
         """
+        if self._custom_Tgas is not None:
+            r_flat = np.atleast_1d(r).ravel()
+            r_clipped = np.clip(r_flat, self._custom_r[0], self._custom_r[-1])
+            T = np.interp(r_clipped, self._custom_r, self._custom_Tgas)
+            if np.ndim(r) == 0:
+                return T.item()
+            return T.reshape(np.shape(r))
         return self.params.tmidplan_ref*(r/self.params.ref_radius)**(-self.params.q_exp)
 
     def temp_atmos(self, r):
@@ -385,7 +418,7 @@ class Disk:
             return np.array(sigmad), sig_single
         
         elif self.params.sigma_compute == 'custom':
-            r_custom, sigmad_table, siggas_table = custom.surfacedensities(self.params.sigma_path)
+            r_custom, sigmad_table, siggas_table, _ = custom.surfacedensities(self.params.sigma_path)
             # sigmad_table: (n_sizes, n_file_radii), r_custom: (n_file_radii,)
             # Interpolate each size bin onto the grid radii r (can be 2D or 3D meshgrid)
             # Clamp radii to the table range to avoid midplane band artifacts

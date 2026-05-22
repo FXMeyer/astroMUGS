@@ -250,7 +250,7 @@ def density2D_grid_interactive(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gn
 
 
 def temperature2D_grid(path='thermal/', vmin=1e0, vmax=1e3, cmap='gnuplot2',
-                    xlim=None, ylim=None, figsize=(18, 16)):
+                    xlim=None, ylim=None, figsize=(10, 14)):
     """Plot all dust species on a single figure with subplots, plus total density."""
     grid = pd.read_table(path + 'amr_grid.inp', engine='python', skiprows=5)
     nr = int(grid.columns[0].split("  ")[0])

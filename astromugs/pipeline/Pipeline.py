@@ -713,7 +713,7 @@ class Pipeline:
 
             # If custom sigma, override n_gas with gas density from the custom file, because the n_gas is derived from dtogas in the coupling, which is wrong if sigma_gas is custom.
             if self.params.disk.sigma_compute == 'custom' and len(self.grid.hg_chem) == 0:
-                r_custom, _, siggas_table = custom_io.surfacedensities(self.params.disk.sigma_path)
+                r_custom, _, siggas_table, _ = custom_io.surfacedensities(self.params.disk.sigma_path)
                 temp_disk = Disk(params=self.params.disk, dust=self.grid.dust[0])
                 hg = temp_disk.scaleheight(self.grid.rchem)  # cm
                 for idx, r in enumerate(self.grid.rchem):

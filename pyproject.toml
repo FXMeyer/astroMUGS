@@ -24,3 +24,6 @@ dynamic = ["version", "readme", "classifiers", "requires-python"]
 
 [tool.setuptools.dynamic]
 readme = {file = "README", content-type = "text/markdown"}
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov"]

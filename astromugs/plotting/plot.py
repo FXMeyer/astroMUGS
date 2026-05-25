@@ -753,7 +753,7 @@ def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='
     plt.show()
 
 
-def grain_sizes(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, cmap='gnuplot2',
+def nmgc_graindensities(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, cmap='gnuplot2',
                 xlim=None, ylim=None, figsize=(14, 10), save=False, savename='grain_sizes.pdf'):
     """Plot 2D (r, z) maps per grain size from the 1D_grain_sizes.in files.
 

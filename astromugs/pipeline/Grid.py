@@ -356,11 +356,13 @@ class Grid:
         self.theta_edge = theta_edge
         self.phi_edge = phi_edge
 
-    def set_chemdisk_grid(self, r, max_H=4, nz_chem=64):
+    def set_chemdisk_grid(self, r, max_H=4, nz_chem=64, stretch=1.0):
         """Build a vertical chemistry grid for a disk model.
 
         The vertical coordinate runs from ``max_H`` scale heights down
-        to the midplane with uniform spacing in normalised units.
+        to the midplane.  Spacing is uniform by default; setting ``stretch``
+        redistributes the same number of points so that resolution is
+        concentrated near the midplane or near the disk surface.
 
         Parameters
         ----------
@@ -370,20 +372,23 @@ class Grid:
             Upper limit of the grid expressed in gas scale heights.
         nz_chem : int, optional
             Number of vertical grid points (same at all radii).
+        stretch : float, optional
+            Power-law exponent controlling the vertical spacing.
+            ``stretch=1.0`` (default) gives uniform spacing.
+            ``stretch>1.0`` concentrates points near the midplane (z=0),
+            useful when high chemical resolution is needed inside the disk.
+            ``stretch<1.0`` concentrates points near the disk surface
+            (z=max_H), useful when the atmosphere needs finer sampling.
         """
-        #hg = self.disk.scaleheight(np.array(r))
-        pts = np.arange(0, nz_chem, 1)
-        #zchem = np.ones((len(rchem), nb_points))
-
-        #hh, ptpt = np.meshgrid(hchem, pts)
-        z = (1. - (2.*pts/(2.*nz_chem - 1.)))*max_H#*Hg
+        t = np.linspace(0, 1, nz_chem)
+        z = (1. - t**stretch) * max_H
 
         self.rchem = np.array(r)
         self.zchem = z
         self.nz_chem = nz_chem
 
 
-    def set_chem_grid(self, r, z0=0, zmax=None, msize=None, nbcells=70):
+    def set_chem_grid(self, r, z0=0, zmax=None, msize=None, nbcells=70, stretch=1.0):
         """Build a custom spatial grid for chemistry (disk, envelope, etc.).
 
         Two modes are available. If *zmax* is given, the vertical extent is
@@ -405,14 +410,22 @@ class Grid:
             altitude at each radius is computed as sqrt(msize^2 - r^2).
         nbcells : int, optional
             Number of vertical cells (same for all radii).
+        stretch : float, optional
+            Power-law exponent controlling the vertical spacing.
+            ``stretch=1.0`` (default) gives uniform spacing.
+            ``stretch>1.0`` concentrates points near the midplane (z=z0),
+            useful when high chemical resolution is needed inside the disk.
+            ``stretch<1.0`` concentrates points near the surface (z=zmax),
+            useful when the atmosphere needs finer sampling.
         """
         self.nz_chem = nbcells
- 
+        t = np.linspace(0, 1, nbcells)
+
         if zmax != None: #if user provides maximum altitude in au, it sets the maximum z at all radii. By default the minimum value z0 is 0. That creates a 2D structure.
             self.rchem = np.array(r)
             z = np.zeros((len(self.rchem), nbcells))
             for idx, rval in enumerate(self.rchem):
-                z[idx,:] = np.linspace(z0, zmax, nbcells)
+                z[idx,:] = z0 + (zmax - z0) * t**stretch
             self.zchem = np.flip(np.array(z), axis=1) #flip because the user gives increasing values and nautilus needs decreasing values.
 
         if msize != None: #if user wants the altitude max such that the model is a sphere i.e. zmax at each radius follows the spherical structure.
@@ -423,7 +436,7 @@ class Grid:
             z = np.zeros((len(self.rchem), nbcells))
 
             for idx, zmax_x in enumerate(zmax):
-                z[idx,:] = np.linspace(0, zmax_x, nbcells)
+                z[idx,:] = zmax_x * t**stretch
 
             self.zchem = np.flip(z, axis=1) #flip because the user gives increasing values and nautilus needs decreasing values.
 

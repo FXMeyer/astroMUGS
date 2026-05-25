@@ -539,6 +539,7 @@ class Pipeline:
                        min_gas_density=1e0,
                        min_av=1e-2,
                        max_uv=None,
+                       cap_uv_floor=True,
                        temp_gas='dust',
                        static=True,
                        param=True,
@@ -596,6 +597,11 @@ class Pipeline:
         max_uv : float or None, optional
             Maximum UV field value. If None, no cap is applied. Default is
             None.
+        cap_uv_floor : bool, optional
+            If True (default), cap the UV factor at 10 Habing for cells at
+            the gas density floor. Set to False to keep the full geometric
+            UV value in those cells (removes the discontinuity at the
+            floor-density boundary visible when plotting the uv column).
         temp_gas : str, optional
             Gas temperature source: 'dust' uses the area-weighted dust
             temperature, 'param' uses a parametrized gas temperature added
@@ -609,7 +615,7 @@ class Pipeline:
             Write the ``element.in`` file. Default is True.
         abundances : str, optional
             Initial abundances preset name (e.g., 'atomic'). Default is
-            'atomic'.
+            'atomic' for solar-composition. It can also be a filepath.
         network : bool, optional
             Write the chemical network file. Default is True.
         multi_grain : bool, optional
@@ -806,8 +812,9 @@ class Pipeline:
                                     avnh_fact,
                                     uvfactor,
                                     min_gas_density=min_gas_density,
-                                    min_av = min_av,
+                                    min_av=min_av,
                                     max_uv=max_uv,
+                                    cap_uv_floor=cap_uv_floor,
                                     rho_m=rho_m)
             if multi_grain == True:
                 if param == True:
@@ -836,8 +843,9 @@ class Pipeline:
                                     avnh_fact,
                                     uvfactor,
                                     min_gas_density=min_gas_density,
-                                    min_av = min_av,
+                                    min_av=min_av,
                                     max_uv=max_uv,
+                                    cap_uv_floor=cap_uv_floor,
                                     rho_m=rho_m)
 
                 if nbspecies > 1:

@@ -753,6 +753,7 @@ def static(path, dist, gas_density,
            min_gas_density=1e0,
            min_av=1e-3,
            max_uv=None,
+           cap_uv_floor=True,
            dtogas=1e-2,
            rho_m=2.5):
     """Write the 1D static structure file for Nautilus.
@@ -789,6 +790,12 @@ def static(path, dist, gas_density,
         Floor value for visual extinction [mag].
     max_uv : float or None, optional
         Maximum allowed UV factor. If None, no cap is applied.
+    cap_uv_floor : bool, optional
+        If True (default), cap the UV factor at 10 Habing for cells whose
+        gas density is at the floor value (``gas_density <= min_gas_density``).
+        This avoids stiff chemistry in artificial floor cells but creates a
+        sharp UV discontinuity at the floor-density boundary in the inner
+        disk. Set to False to keep the full geometric UV value everywhere.
     dtogas : float, optional
         Dust-to-gas mass ratio.
     rho_m : float, optional
@@ -815,7 +822,8 @@ def static(path, dist, gas_density,
     inv_ab = nh/np.maximum(dust_density, min_dust_density)
     uvf = uvfactor
     # Cap UV where density is at the floor to avoid stiff chemistry regimes
-    uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, 10.0), uvf)
+    if cap_uv_floor:
+        uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, 10.0), uvf)
     # Additionally cap UV globally if max_uv is set
     if max_uv is not None:
         uvf = np.minimum(uvf, max_uv)

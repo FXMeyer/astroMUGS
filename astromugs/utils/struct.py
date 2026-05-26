@@ -147,7 +147,7 @@ class EnvelopeParams:
 class DiskParams:
     acc_rate: float = field(default=1.000e-05, 
         metadata={'desc': r'[Msun yr-1] Accretion rate '})
-    alpha: float = field(default=1.000e-02, 
+    alpha: float = field(default=1.000e-03, 
         metadata={'desc': 'Viscosity coefficient'})
     coordsystem: Literal['spherical', 'cylindrical'] = field(default='spherical', 
         metadata={'desc': 'Coordinate system for radiative transfer'})

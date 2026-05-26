@@ -543,39 +543,64 @@ def localflux(path='thermal/'):
     plt.show()
 
 
-def image(pathfile='thermal/', vmin=1e-10, vmax=1e3, cmap='gnuplot2'):
-    image = np.loadtxt(pathfile, skiprows=8)
-    ##!!WARNING: WE SKIP ROWS BUT WE SHOULDNOT, NPIX and PIX_AU SHOULD BE DERIVED FROM THE HEADER.
+def image(pathfile='thermal/', distance=100, vmin=1e-10, vmax=1e3, cmap='gnuplot2',
+          labels=None):
+    """Plot a multi-wavelength RADMC3D continuum image (Stokes I).
 
-    npix = 250
-    pix_au = 59840000000000.000/autocm
-    box_au = npix*pix_au
+    Parameters
+    ----------
+    pathfile : str
+        Path to the RADMC3D image.out file.
+    distance : float, optional
+        Source distance in parsec. Used to convert specific intensity
+        [erg/s/cm²/Hz/sr] to flux density [Jy/pixel]. Default is 100 pc.
+    vmin, vmax : float, optional
+        Color scale limits in Jy/pixel.
+    cmap : str, optional
+        Colormap name.
+    labels : list of str, optional
+        Wavelength labels for each panel. If None, labels are generated
+        automatically from the wavelengths read in the image header.
+    """
+    # --- Read RADMC3D image header ---
+    with open(pathfile, 'r') as f:
+        _ = f.readline()                                            # format number
+        npix_x, npix_y = [int(x) for x in f.readline().split()]   # image size [pixels]
+        nlam = int(f.readline())                                    # number of wavelengths
+        pix_cm, _ = [float(x) for x in f.readline().split()]       # pixel size [cm]
+        wavelengths = [float(f.readline()) for _ in range(nlam)]   # wavelengths [microns]
+
+    pix_au   = pix_cm / autocm
+    box_au   = npix_x * pix_au
     half_box = box_au / 2.0
 
-    image = np.reshape(image, (3, npix, npix, 4))
+    # --- Pixel solid angle and Jy/pixel conversion factor ---
+    distance_cm = distance * 3.086e18               # pc → cm
+    omega_pix   = (pix_cm / distance_cm) ** 2       # sr/pixel
+    to_jy       = 1e23 * omega_pix                  # erg/s/cm²/Hz/sr → Jy/pixel
 
+    data = np.loadtxt(pathfile, skiprows=4 + nlam + 1)
+    data = np.reshape(data, (nlam, npix_y, npix_x, 4))
 
     extent = [-half_box, half_box, -half_box, half_box]
 
-    # --- Prepare Stokes I images ---
-    imgs = [
-        image[0, :, :, 0] * 1e23,
-        image[1, :, :, 0] * 1e23,
-        image[2, :, :, 0] * 1e23
-    ]
+    # --- Stokes I images in Jy/pixel ---
+    imgs = [data[i, :, :, 0] * to_jy for i in range(nlam)]
 
-    labels = [
-        "Stokes I - 0.870 mm",
-        "Stokes I - 1.2 mm",
-        "Stokes I - 3.1 mm"
-    ]
+    # --- Wavelength labels ---
+    if labels is None:
+        def _wave_label(lam):
+            if lam >= 1000:
+                return f'Stokes I - {lam/1000:.2g} mm'
+            elif lam >= 1:
+                return f'Stokes I - {lam:.4g} μm'
+            else:
+                return f'Stokes I - {lam*1000:.4g} nm'
+        labels = [_wave_label(w) for w in wavelengths]
 
-    # --- Global normalization ---
-    all_vals = np.concatenate([img[img > 0].ravel() for img in imgs])
-    # vmin = all_vals.min()
-    # vmax = all_vals.max()
-    #----------------------------------
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, nlam, figsize=(5*nlam, 5), sharex=True, sharey=True)
+    if nlam == 1:
+        axes = [axes]
 
     for i, ax in enumerate(axes):
 
@@ -587,18 +612,9 @@ def image(pathfile='thermal/', vmin=1e-10, vmax=1e3, cmap='gnuplot2'):
             norm=LogNorm(vmin=vmin, vmax=vmax),
             interpolation='nearest'
         )
-        box = 300
-        # ax.set_xlim(x_au-box, x_au+box)
-        # ax.set_ylim(y_au-box, y_au+box)
 
         ax.tick_params(labelsize=17)
         ax.set_xlabel(r'x [au]', fontsize=17)
-
-        # plt.scatter(
-        #     x_au, 
-        #     y_au, 
-        #     color='cyan', 
-        #     marker='x', s=100)
 
         if i == 0:
             ax.set_ylabel(r'y [au]', fontsize=17)
@@ -623,41 +639,71 @@ def image(pathfile='thermal/', vmin=1e-10, vmax=1e3, cmap='gnuplot2'):
         pad=0.02
     )
 
-    cbar.set_label('flux [Jy]', fontsize=17)
+    cbar.set_label(r'$I_\nu$ [Jy pixel$^{-1}$]', fontsize=17)
     cbar.ax.tick_params(labelsize=14)
 
     plt.show()
 
 
-def image_vertical_cut(pathfile='thermal/', xlim=None,ylim=None, labels=None, figsize=(9.6, 8.2)):
-    """Plot vertical cuts (along y at x=0) of Stokes I for each wavelength."""
-    image = np.loadtxt(pathfile, skiprows=8)
+def image_vertical_cut(pathfile='thermal/', distance=100, xlim=None, ylim=None,
+                       labels=None, figsize=(9.6, 8.2)):
+    """Plot vertical cuts (along y at x=0) of Stokes I for each wavelength.
 
-    npix = 250
-    pix_au = 59840000000000.000 / autocm
-    box_au = npix * pix_au
+    Parameters
+    ----------
+    pathfile : str
+        Path to the RADMC3D image.out file.
+    distance : float, optional
+        Source distance in parsec. Used to convert specific intensity
+        [erg/s/cm²/Hz/sr] to flux density [Jy/pixel]. Default is 100 pc.
+    xlim, ylim : tuple, optional
+        Axis limits.
+    labels : list of str, optional
+        Wavelength labels. If None, generated automatically from the header.
+    figsize : tuple, optional
+        Figure size.
+    """
+    # --- Read RADMC3D image header ---
+    with open(pathfile, 'r') as f:
+        _ = f.readline()                                            # format number
+        npix_x, npix_y = [int(x) for x in f.readline().split()]   # image size [pixels]
+        nlam = int(f.readline())                                    # number of wavelengths
+        pix_cm, _ = [float(x) for x in f.readline().split()]       # pixel size [cm]
+        wavelengths = [float(f.readline()) for _ in range(nlam)]   # wavelengths [microns]
+
+    pix_au   = pix_cm / autocm
+    box_au   = npix_y * pix_au
     half_box = box_au / 2.0
 
-    image = np.reshape(image, (3, npix, npix, 4))
+    # --- Pixel solid angle and Jy/pixel conversion factor ---
+    distance_cm = distance * 3.086e18
+    omega_pix   = (pix_cm / distance_cm) ** 2
+    to_jy       = 1e23 * omega_pix
 
-    y_au = np.linspace(-half_box, half_box, npix)
-    ix0 = npix // 2  # column at x=0
+    data = np.loadtxt(pathfile, skiprows=4 + nlam + 1)
+    data = np.reshape(data, (nlam, npix_y, npix_x, 4))
+
+    y_au = np.linspace(-half_box, half_box, npix_y)
+    ix0  = npix_x // 2  # column at x=0
 
     if labels is None:
-        labels = [
-            "0.870 mm",
-            "1.2 mm",
-            "3.1 mm"
-        ]
+        def _wave_label(lam):
+            if lam >= 1000:
+                return f'{lam/1000:.2g} mm'
+            elif lam >= 1:
+                return f'{lam:.4g} μm'
+            else:
+                return f'{lam*1000:.4g} nm'
+        labels = [_wave_label(w) for w in wavelengths]
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    for i in range(image.shape[0]):
-        flux_cut = image[i, :, ix0, 0] * 1e23  # Stokes I, converted to Jy
+    for i in range(nlam):
+        flux_cut = data[i, :, ix0, 0] * to_jy
         ax.semilogy(y_au, flux_cut, linewidth=2, label=labels[i])
 
     ax.set_xlabel(r'y [au]', fontsize=20)
-    ax.set_ylabel(r'flux [Jy]', fontsize=20)
+    ax.set_ylabel(r'$I_\nu$ [Jy pixel$^{-1}$]', fontsize=20)
     ax.legend(fontsize=15)
     ax.tick_params(labelsize=18)
     if xlim:
@@ -728,7 +774,7 @@ def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='
     # Plot
     fig, ax = plt.subplots(figsize=figsize)
     ax.set_aspect('equal', adjustable='box')
-    t = ax.pcolormesh(rr, zz, static_map, cmap=cmap, shading='gouraud',
+    t = ax.pcolormesh(rr, zz, static_map, cmap=cmap, shading='auto',
                       norm=LogNorm(vmin=vmin, vmax=vmax), rasterized=True)
     clr = fig.colorbar(t, pad=0.01)
     clr.set_label(column, fontsize=16)
@@ -753,7 +799,7 @@ def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='
     plt.show()
 
 
-def nmgc_graindensities(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, cmap='gnuplot2',
+def nmgc_grainsizes(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, cmap='gnuplot2',
                 xlim=None, ylim=None, figsize=(14, 10), save=False, savename='grain_sizes.pdf'):
     """Plot 2D (r, z) maps per grain size from the 1D_grain_sizes.in files.
 

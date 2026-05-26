@@ -13,6 +13,7 @@ import glob, sys
 
 import numpy as np
 import pandas as pd
+import os
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
@@ -27,7 +28,7 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', den
     nr = int(grid.columns[0].split("  ")[0])
     nt = int(grid.columns[0].split("  ")[1])
     grid = grid[grid.columns[0]].values
-
+    grid = np.array(grid, copy=True)
     dens = pd.read_table(path + 'dust_density.inp', engine='python', header=None, skiprows=3)
     dens = dens[0].values
     nspecies = int(len(dens) / (nr * nt))
@@ -39,7 +40,7 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', den
     rr_edge, tt_edge = np.meshgrid(r_edge, theta_edge)
     R = rr_edge * np.sin(tt_edge)
     Z = rr_edge * np.cos(tt_edge)
-
+    dens = np.array(dens,copy=True)
     dens[dens <= 1e-100] = 1e-100
 
     # Try to read grain sizes for subplot labels
@@ -120,6 +121,140 @@ def density2D_grid(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', den
     plt.show()
 
 
+def density1D_midplane(path='thermal/', vmin=1e-30, vmax=1e-15, dens_type='mass',
+                        xlim=None, dust=None, figsize=(12, 8)):
+    """
+    Plots the 1D dust density profile in the midplane (z=0 / theta=pi/2) 
+    as a function of radius for each dust species.
+
+    Parameters:
+    -----------
+    path : str
+        Path to the directory containing RADMC-3D files.
+    vmin, vmax : float
+        Limits for the Y-axis (density).
+    dens_type : str
+        Type of density to plot: 'mass' (g/cm^3), 'number' (cm^-3), or 'surface' (cm^-1).
+    xlim : tuple/list, optional
+        Limits for the X-axis (radius in au).
+    dust : object, optional
+        An external dust object containing grain sizes and masses if files are missing.
+    figsize : tuple
+        Size of the output matplotlib figure.
+    """
+    
+    # 1. Read grid structure and dust density data
+    # Read the AMR grid file to extract dimensions (nr = radial bins, nt = theta bins)
+    grid = pd.read_table(path + 'amr_grid.inp', engine='python', skiprows=5)
+    nr = int(grid.columns[0].split("  ")[0])
+    nt = int(grid.columns[0].split("  ")[1])
+    grid = np.array(grid[grid.columns[0]].values, copy=True)
+    
+    # Read the raw dust density file (flat 1D array of values)
+    dens = pd.read_table(path + 'dust_density.inp', engine='python', header=None, skiprows=3)
+    dens = dens[0].values
+    
+    # Deduce the number of dust species and reshape into a 3D array: (species, theta, radius)
+    nspecies = int(len(dens) / (nr * nt))
+    dens = np.reshape(dens, (nspecies, nt, nr))
+
+    # 2. Extract radial coordinates at cell centers (convert from cm to au)
+    # autocm is assumed to be a globally defined constant (1 au = 1.496e13 cm)
+    r_edge = grid[:nr+1] / autocm
+    r_center = 0.5 * (r_edge[:-1] + r_edge[1:])
+
+    # 3. Identify the midplane index (theta = pi/2)
+    # In RADMC-3D spherical coordinates, the equator is exactly at the midpoint of the theta axis
+    idx_midplane = nt // 2 
+
+    # 4. Read grain sizes and masses for plotting labels and conversions
+    sizes_file = path + 'dust_sizes.inp'
+    if os.path.isfile(sizes_file):
+        sizes = np.loadtxt(sizes_file)
+        sizes = np.atleast_1d(sizes)
+    elif dust != None:
+        rho_m = dust.rho_m #g.cm3
+        sizes = dust.sizes()[0] # microns
+        grain_mass = dust.grainmass() # in gram
+
+    else:
+        sizes = None
+
+    # 5. Configure the figure layout (Grid of subplots)
+    npanels = nspecies + 1  # Number of species + 1 extra panel for the total sum
+    ncols = min(npanels, 3) # Maximum of 3 columns
+    nrows = int(np.ceil(npanels / ncols))
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharex=True, sharey=True)
+    axes = np.atleast_2d(axes) # Ensure axes is always a 2D array even for a single row
+
+    # Determine Y-axis label depending on the requested density type
+    if dens_type == 'number':
+        ylabel = r'$n_\mathrm{d}$ [cm$^{-3}$]'
+    elif dens_type == 'surface':
+        ylabel = r'Surfaces [cm$^{-1}$]'
+    else:
+        ylabel = r'$\rho_\mathrm{d}$ [g cm$^{-3}$]'
+
+    # 6. Plotting loop over all available subplot slots
+    for idx in range(nrows * ncols):
+        ax = axes.flat[idx]
+        
+        if idx < nspecies:
+            # Extract 1D radial profile at the midplane for the current dust species
+            profile = dens[idx, idx_midplane, :]
+            
+            # Apply conversion factors based on the selected density type
+            if dens_type == 'number':
+                y_data = profile / grain_mass[idx] # Mass density / mass of one grain
+            elif dens_type == 'surface':
+                # Cross-sectional area calculation (converting size from micron to cm)
+                y_data = 4 * np.pi * (sizes[idx] * 1e-4) * profile / grain_mass[idx]
+            elif dens_type == 'mass':
+                y_data = profile # Default is raw mass density
+                
+            ax.plot(r_center, y_data, color='darkblue', lw=2)
+            ax.set_title(f'Bin {idx+1}', fontsize=12)
+            
+            # Add text box indicating the grain size for this specific bin
+            if sizes is not None and idx < len(sizes):
+                s = sizes[idx]
+                size_label = f'{s/1e3:.1f} mm' if s >= 1e3 else f'{s:.2f} ' + r'$\mu$m'
+                ax.text(0.05, 0.95, size_label, transform=ax.transAxes,
+                        fontsize=12, verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+        elif idx == nspecies:
+            # Plot total cumulative density (only relevant/calculated for mass density)
+            if dens_type == 'mass':
+                total_profile = dens[:, idx_midplane, :].sum(axis=0)
+                ax.plot(r_center, total_profile, color='black', lw=2.5, linestyle='--')
+                ax.set_title('Total Mass', fontsize=12)
+            else:
+                ax.axis('off') # Hide total panel if it's not mass density
+        else:
+            ax.axis('off') # Hide any remaining empty subplots in the grid
+
+        # Configure axes scales and limits
+        ax.set_yscale('log')
+        ax.set_ylim(vmin, vmax)
+        if xlim:
+            ax.set_xlim(xlim)
+        else:
+            ax.set_xscale('log') # Logarithmic scale is standard for protoplanetary disks
+
+    # Add global outer axis labels (only on edge plots thanks to sharex/sharey)
+    for ax in axes[-1, :]:
+        if ax.get_visible():
+            ax.set_xlabel('r [au]', fontsize=12)
+    for ax in axes[:, 0]:
+        ax.set_ylabel(ylabel, fontsize=12)
+
+    fig.tight_layout()
+    plt.show()
+
+
+
 def density2D_grid_interactive(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gnuplot2', dens_type='mass',
                                 xlim=None, ylim=None, dust=None, figsize=(10, 14)):
     """Interactive version of density2D_grid with sliders for vmin/vmax.
@@ -140,7 +275,7 @@ def density2D_grid_interactive(path='thermal/', vmin=1e-30, vmax=1e-15, cmap='gn
     dens = np.reshape(dens, (nspecies, nt, nr))
 
     r_edge = grid[:nr+1] / autocm
-    theta_edge = grid[nr+1:nr+1+nt+1]
+    theta_edge = grid[nr+1:nr+1+nt+1].copy().copy().copy().copy().copy().copy()
     theta_edge[-1] = np.pi
     rr_edge, tt_edge = np.meshgrid(r_edge, theta_edge)
     R = rr_edge * np.sin(tt_edge)
@@ -263,7 +398,7 @@ def temperature2D_grid(path='thermal/', vmin=1e0, vmax=1e3, cmap='gnuplot2',
     temp = np.reshape(temp, (nspecies, nt, nr))
 
     r_edge = grid[:nr+1] / autocm
-    theta_edge = grid[nr+1:nr+1+nt+1]
+    theta_edge = grid[nr+1:nr+1+nt+1].copy().copy().copy().copy().copy().copy()
     theta_edge[-1] = np.pi
     rr_edge, tt_edge = np.meshgrid(r_edge, theta_edge)
     R = rr_edge * np.sin(tt_edge)
@@ -362,6 +497,7 @@ def midplane_temp(path='thermal/', xlim=None, ylim=None):
     temp = temp[0].values
     nbspecies = int(len(temp)/(nr*nt))
     temp = np.reshape(temp, (nbspecies, nt, nr))
+    grid = np.array(grid, copy=True)
     dist = grid[:nr+1]/autocm
     theta = grid[nr+1:nr+1+nt+1]
     theta[-1] = np.pi
@@ -517,6 +653,7 @@ def localflux(path='thermal/'):
     nr = int(grid.columns[0].split("  ")[0])
     nt = int(grid.columns[0].split("  ")[1])
     grid = grid[head[0]].values
+    grid = np.array(grid,copy=True)
     dist = grid[:nr+1]/autocm
     theta = grid[nr+1:nr+1+nt+1]
     theta[-1] = np.pi

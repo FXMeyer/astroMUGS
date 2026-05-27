@@ -564,7 +564,7 @@ def parameters_nmgc(path, resolution, phase=1, \
     f.write("minimum_initial_abundance =  {0:.3E} ! default minimum initial fraction abundance\n".format(minimum_initial_abundance))
     f.close()
 
-def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, dtogas=1e-2, rho_m=2.5):
+def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, cut_cap=True, dtogas=1e-2, rho_m=2.5):
     """Write the multi-grain size input files for Nautilus.
 
     Generates the ``1D_grain_sizes.in`` file containing grain radii, inverse
@@ -599,12 +599,27 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
     Creates ``1D_grain_sizes.in`` and ``temperatures.dat`` in the specified
     directory.
     """
+    gas_density  = np.asarray(gas_density)
+    dust_density = np.asarray(dust_density)
+    T_dust       = np.asarray(T_dust)
+    if cut_cap:
+        # Truncate: drop surface points below min_gas_density
+        # z stored surface→midplane (decreasing z, increasing density)
+        valid = gas_density >= min_gas_density
+        i0 = int(np.argmax(valid)) if valid.any() else len(gas_density) - 1
+        gas_density  = gas_density[i0:]
+        dust_density = dust_density[:, i0:]
+        T_dust       = T_dust[:, i0:]
+        nh = gas_density  # no floor; all points already valid
+    else:
+        # Floor: keep all points, clamp density to min_gas_density
+        nh = np.maximum(gas_density, min_gas_density)
+
     nb_grains = len(sizes[-1])
     f = open(path + '1D_grain_sizes.in',"w")
     f.write('! grain-radius [cm] 1/abundance  grain-temp CR-peak-Temperaturegrain[K] spatial-point\n')
     f.write('\n')
-    nh = np.maximum(gas_density, min_gas_density)
-    for zi in range(0, len(gas_density)):
+    for zi in range(len(gas_density)):
         for ai, a in enumerate(sizes[-1]*1e-4):
             f.write('%10.4E ' %a)
         f.write('    ')
@@ -624,11 +639,13 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
     f.close()
 
     f = open(path + 'temperatures.dat',"w")
-    for zi in range(0, len(gas_density)):
+    for zi in range(len(gas_density)):
         for ai, a in enumerate(sizes[-1]):
             f.write('%12.6E ' %T_dust[ai, zi])
         f.write('\n')
     f.close()
+
+    return len(gas_density)  # actual spatial_resolution for nautilus.in
 
 def uv_factordisk(UV_ref, ref_radius, radius, Hg):
     """Compute the UV scaling factor for a disk geometry.
@@ -754,6 +771,7 @@ def static(path, dist, gas_density,
            min_av=1e-3,
            max_uv=None,
            cap_uv_floor=True,
+           cut_cap=True,
            dtogas=1e-2,
            rho_m=2.5):
     """Write the 1D static structure file for Nautilus.
@@ -805,8 +823,36 @@ def static(path, dist, gas_density,
     -----
     Creates ``1D_static.dat`` in the specified directory.
     """
+    # ── Density handling: truncation (cut_cap=True) or floor (cut_cap=False) ─
+    gas_density = np.asarray(gas_density)
+    if cut_cap:
+        # Truncate: drop surface points below min_gas_density.
+        # z is stored surface→midplane (decreasing z, increasing density).
+        # We keep only the contiguous tail where gas_density >= min_gas_density,
+        # so Nautilus never sees artificially floored cells.
+        valid = gas_density >= min_gas_density
+        i0 = int(np.argmax(valid)) if valid.any() else len(gas_density) - 1
+        dist         = np.asarray(dist)[i0:]
+        gas_density  = gas_density[i0:]
+        T_gas        = np.asarray(T_gas)[i0:]
+        av_z         = np.asarray(av_z)[i0:]
+        T_dust       = np.asarray(T_dust)[i0:]
+        dust_density = np.asarray(dust_density)[i0:]
+        uvfactor     = np.asarray(uvfactor)[i0:]
+        avnh_fact    = np.asarray(avnh_fact)[i0:]
+        nh = gas_density              # no floor needed; all points already valid
+    else:
+        # Floor: keep all points, clamp density to min_gas_density.
+        dist     = np.asarray(dist)
+        T_gas    = np.asarray(T_gas)
+        av_z     = np.asarray(av_z)
+        T_dust   = np.asarray(T_dust)
+        dust_density = np.asarray(dust_density)
+        uvfactor = np.asarray(uvfactor)
+        avnh_fact = np.asarray(avnh_fact)
+        nh = np.maximum(gas_density, min_gas_density)
+
     distance = dist
-    nh = np.maximum(gas_density, min_gas_density)
     grain_mass = (4./3.) * np.pi * rho_m * (r_grain*1e-4)**3
     min_dust_density = dtogas * mu * amu * min_gas_density / grain_mass
     Tgas = T_gas#*1.02
@@ -821,7 +867,8 @@ def static(path, dist, gas_density,
     rgrain = r_grain*1e-4*np.ones(len(dist))
     inv_ab = nh/np.maximum(dust_density, min_dust_density)
     uvf = uvfactor
-    # Cap UV where density is at the floor to avoid stiff chemistry regimes
+    # cap_uv_floor has no effect after truncation (all nH >= min_gas_density),
+    # but kept for backward compatibility in case of exact-boundary points
     if cap_uv_floor:
         uvf = np.where(gas_density <= min_gas_density, np.minimum(uvf, 10.0), uvf)
     # Additionally cap UV globally if max_uv is set
@@ -831,6 +878,7 @@ def static(path, dist, gas_density,
     static_array = np.stack((distance, nh, Tgas, avz, diff_coef, Tdust, inv_ab, avnhfact, rgrain, uvf), axis=-1)
     header_static = "z [AU] ; H Gas density [part/cm^3] ; Tgas [K] ; Av [mag] ; Diffusion coef [cm^2/s]; Tdust [K]; 1/ab of grains ; AV/NH conversion factor ; Grain radius (cm) ; uv factor in unit of the reference flux"
     np.savetxt(path+'1D_static.dat', static_array, fmt='%.5E', delimiter='   ', newline='\n', header=header_static , comments='! ', encoding=None)
+    return len(distance)    # actual spatial_resolution for nautilus.in
 
 def network(path):
     """Copy the chemical network files to the simulation directory.

@@ -498,6 +498,7 @@ def midplane_temp(path='thermal/', xlim=None, ylim=None):
     temp = temp[0].values
     nbspecies = int(len(temp)/(nr*nt))
     temp = np.reshape(temp, (nbspecies, nt, nr))
+    grid = np.array(grid,copy=True)
     dist = grid[:nr+1]/autocm
     theta = grid[nr+1:nr+1+nt+1]
     theta[-1] = np.pi

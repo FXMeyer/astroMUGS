@@ -397,7 +397,7 @@ def temperature2D_grid(path='thermal/', vmin=1e0, vmax=1e3, cmap='gnuplot2',
     temp = temp[0].values
     nspecies = int(len(temp) / (nr * nt))
     temp = np.reshape(temp, (nspecies, nt, nr))
-
+    grid = np.array(grid,copy=True)
     r_edge = grid[:nr+1] / autocm
     theta_edge = grid[nr+1:nr+1+nt+1]
     theta_edge[-1] = np.pi

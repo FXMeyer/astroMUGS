@@ -558,6 +558,7 @@ class Pipeline:
                        min_av=1e-2,
                        max_uv=None,
                        cap_uv_floor=True,
+                       cut_cap=True,
                        temp_gas='dust',
                        static=True,
                        param=True,
@@ -807,8 +808,7 @@ class Pipeline:
                     T_gas = self.grid.tgas_chem[0][idx]
 
             if multi_grain == False:
-                if param == True:
-                    nautilus.write.parameters_nmgc(path, grain_temp='table_1D', nb_outputs=nb_outputs, multi_grain=0, tunneling=tunneling, is_h2_formation_rate=is_h2_formation_rate, resolution=self.grid.nz_chem, stop_time=stop_time, uv_flux=np.mean(uvfactor), **keywords)
+                nz_actual = self.grid.nz_chem  # default if static not written
                 if static == True:
                     if len(self.grid.hg_chem) > 0:
                         dist = self.grid.zchem*self.grid.hg_chem[0][idx]/autocm
@@ -819,7 +819,7 @@ class Pipeline:
                         nH = n_gas[idx, :]
                         md = (4/3)*np.pi*rho_m*(rsingle*1e-4)**3
                         nd = dtogas*n_gas[idx, :]*amu*mu/md
-                    nautilus.write.static(path, \
+                    nz_actual = nautilus.write.static(path, \
                                     dist, \
                                     nH, \
                                     T_gas, \
@@ -833,10 +833,12 @@ class Pipeline:
                                     min_av=min_av,
                                     max_uv=max_uv,
                                     cap_uv_floor=cap_uv_floor,
+                                    cut_cap=cut_cap,
                                     rho_m=rho_m)
-            if multi_grain == True:
                 if param == True:
-                    nautilus.write.parameters_nmgc(path, grain_temp='fixed_to_dust_size', nb_outputs=nb_outputs, multi_grain=1, resolution=self.grid.nz_chem, tunneling=tunneling, is_h2_formation_rate=is_h2_formation_rate, stop_time=stop_time, uv_flux=np.mean(uvfactor), **keywords)
+                    nautilus.write.parameters_nmgc(path, grain_temp='table_1D', nb_outputs=nb_outputs, multi_grain=0, tunneling=tunneling, is_h2_formation_rate=is_h2_formation_rate, resolution=nz_actual, stop_time=stop_time, uv_flux=np.mean(uvfactor), **keywords)
+            if multi_grain == True:
+                nz_actual = self.grid.nz_chem  # default if static not written
                 if static == True:
                     if len(self.grid.hg_chem) > 0:
                         dist = self.grid.zchem*self.grid.hg_chem[0][idx]/autocm
@@ -850,7 +852,7 @@ class Pipeline:
                     ##!!!!!!! TO BE REMOVED !!!!!!!
                     #av_z[idx, :] = np.where(dist>zcav, av_z[idx, :]*10, av_z[idx, :])
                     ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                    nautilus.write.static(path, \
+                    nz_actual = nautilus.write.static(path, \
                                     dist, \
                                     nH, \
                                     T_gas, \
@@ -864,7 +866,10 @@ class Pipeline:
                                     min_av=min_av,
                                     max_uv=max_uv,
                                     cap_uv_floor=cap_uv_floor,
+                                    cut_cap=cut_cap,
                                     rho_m=rho_m)
+                if param == True:
+                    nautilus.write.parameters_nmgc(path, grain_temp='fixed_to_dust_size', nb_outputs=nb_outputs, multi_grain=1, resolution=nz_actual, tunneling=tunneling, is_h2_formation_rate=is_h2_formation_rate, stop_time=stop_time, uv_flux=np.mean(uvfactor), **keywords)
 
                 if nbspecies > 1:
                     if len(self.grid.hg_chem) > 0:
@@ -873,7 +878,7 @@ class Pipeline:
                     elif coupling_dens == True:
                         nH = n_gas[idx, :]
                         nd = n_dust[:, idx, :]
-                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density, rho_m=rho_m)
+                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density, cut_cap=cut_cap, rho_m=rho_m)
                 else:
                     print('WARNING: multi_grain = True, but the model has only one grain bin. Please, check the number of grain size or switch multi_grain to False.')
 

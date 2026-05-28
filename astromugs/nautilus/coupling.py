@@ -603,7 +603,7 @@ def to_spherical(chemmodel, nr, nt, dist, theta, struct='numberdens_species'):
             closest_r = min(enumerate(r_naut), key=lambda x: abs(x[1]-r_sph)) #find closest grid point
             closest_z = min(enumerate(chemmodel[closest_r[1]]['z']), key=lambda x: abs(x[1]-z_sph)) #find closest grid point
             if z_sph > chemmodel[closest_r[1]]['z'][0] and d > rcut:
-                spherical_struct[id_d, id_thet] = np.min(chemmodel[closest_r[1]]['numberdens_species'])*1e-1
+                spherical_struct[id_d, id_thet] = 0.0  # above truncated domain: no chemistry
             elif d < rcut:
                 spherical_struct[id_d, id_thet] = 1e-20
             else:

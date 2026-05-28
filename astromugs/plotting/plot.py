@@ -701,11 +701,14 @@ def image(pathfile='thermal/', distance=100, vmin=1e-10, vmax=1e3, cmap='gnuplot
     """
     # --- Read RADMC3D image header ---
     with open(pathfile, 'r') as f:
-        _ = f.readline()                                            # format number
+        iformat = int(f.readline())                                 # 1 = I only, 3 = full Stokes
         npix_x, npix_y = [int(x) for x in f.readline().split()]   # image size [pixels]
         nlam = int(f.readline())                                    # number of wavelengths
         pix_cm, _ = [float(x) for x in f.readline().split()]       # pixel size [cm]
         wavelengths = [float(f.readline()) for _ in range(nlam)]   # wavelengths [microns]
+
+    # iformat 3 → full Stokes (I Q U V); anything else → intensity only
+    nstokes = 4 if iformat == 3 else 1
 
     pix_au   = pix_cm / autocm
     box_au   = npix_x * pix_au
@@ -717,7 +720,7 @@ def image(pathfile='thermal/', distance=100, vmin=1e-10, vmax=1e3, cmap='gnuplot
     to_jy       = 1e23 * omega_pix                  # erg/s/cm²/Hz/sr → Jy/pixel
 
     data = np.loadtxt(pathfile, skiprows=4 + nlam + 1)
-    data = np.reshape(data, (nlam, npix_y, npix_x, 4))
+    data = np.reshape(data, (nlam, npix_y, npix_x, nstokes))
 
     extent = [-half_box, half_box, -half_box, half_box]
 
@@ -802,11 +805,13 @@ def image_vertical_cut(pathfile='thermal/', distance=100, xlim=None, ylim=None,
     """
     # --- Read RADMC3D image header ---
     with open(pathfile, 'r') as f:
-        _ = f.readline()                                            # format number
+        iformat = int(f.readline())                                 # 1 = I only, 3 = full Stokes
         npix_x, npix_y = [int(x) for x in f.readline().split()]   # image size [pixels]
         nlam = int(f.readline())                                    # number of wavelengths
         pix_cm, _ = [float(x) for x in f.readline().split()]       # pixel size [cm]
         wavelengths = [float(f.readline()) for _ in range(nlam)]   # wavelengths [microns]
+
+    nstokes = 4 if iformat == 3 else 1
 
     pix_au   = pix_cm / autocm
     box_au   = npix_y * pix_au
@@ -818,7 +823,7 @@ def image_vertical_cut(pathfile='thermal/', distance=100, xlim=None, ylim=None,
     to_jy       = 1e23 * omega_pix
 
     data = np.loadtxt(pathfile, skiprows=4 + nlam + 1)
-    data = np.reshape(data, (nlam, npix_y, npix_x, 4))
+    data = np.reshape(data, (nlam, npix_y, npix_x, nstokes))
 
     y_au = np.linspace(-half_box, half_box, npix_y)
     ix0  = npix_x // 2  # column at x=0
@@ -888,25 +893,35 @@ def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='
                if os.path.isdir(os.path.join(chempath, d)) and re.match(r'^\d+AU$', d)]
     rchem = sorted([int(d.replace('AU', '')) for d in folders])
 
-    # Read the first file to get nbz
-    first_file = os.path.join(chempath, f'{rchem[0]}AU', '1D_static.dat')
-    first = pd.read_table(first_file, sep=r"\s+", comment='!', header=None, engine='python')
-    nbz = len(first)
-
-    # Build 2D arrays
-    static_map = np.zeros((nbz, len(rchem)))
-    temp_map = np.zeros((nbz, len(rchem)))
-    zz = np.zeros((nbz, len(rchem)))
-
-    for idx, r in enumerate(rchem):
+    # Read all files at once (nbz may differ per radius after surface truncation)
+    all_data = []
+    for r in rchem:
         filepath = os.path.join(chempath, f'{r}AU', '1D_static.dat')
-        data = pd.read_table(filepath, sep=r"\s+", comment='!', header=None, engine='python')
-        data.columns = columns
-        static_map[:, idx] = data[column].values
-        temp_map[:, idx] = data['Td'].values
-        zz[:, idx] = data['z'].values
+        df = pd.read_table(filepath, sep=r"\s+", comment='!', header=None, engine='python')
+        df.columns = columns
+        all_data.append(df)
 
-    rr, _ = np.meshgrid(rchem, np.arange(nbz))
+    nbz_max = max(len(d) for d in all_data)
+
+    # Build 2D arrays; NaN for cells above the truncation height of each radius
+    static_map = np.full((nbz_max, len(rchem)), np.nan)
+    temp_map   = np.full((nbz_max, len(rchem)), np.nan)
+    zz         = np.zeros((nbz_max, len(rchem)))
+
+    for idx, data in enumerate(all_data):
+        nbz_r = len(data)
+        start = nbz_max - nbz_r       # top rows belong to the truncated surface
+        static_map[start:, idx] = data[column].values
+        temp_map[start:, idx]   = data['Td'].values
+        z_col = data['z'].values
+        zz[start:, idx] = z_col
+        # Extrapolate z above the truncation so pcolormesh has valid coordinates
+        # (those cells are NaN in data so they will appear transparent)
+        if start > 0:
+            dz = (z_col[0] - z_col[1]) if nbz_r > 1 else z_col[0] * 0.1
+            zz[:start, idx] = z_col[0] + np.arange(start, 0, -1) * dz
+
+    rr, _ = np.meshgrid(rchem, np.arange(nbz_max))
 
     # Plot
     fig, ax = plt.subplots(figsize=figsize)
@@ -986,21 +1001,31 @@ def nmgc_grainsizes(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, 
     ngrains = ncols // 4
     grain_radii_um = grain_radii_cm * 1e4  # cm to microns
 
-    # Read first static file for nbz
-    first_static = os.path.join(chempath, f'{rchem[0]}AU', '1D_static.dat')
-    first = pd.read_table(first_static, sep=r"\s+", comment='!', header=None, engine='python')
-    nbz = len(first)
-    # Build 3D arrays: (ngrains, nbz, nradii)
-    data_map = np.zeros((ngrains, nbz, len(rchem)))
-    zz = np.zeros((nbz, len(rchem)))
+    # Read all static files first (nbz may differ per radius after surface truncation)
+    all_static = []
+    for r in rchem:
+        static_file = os.path.join(chempath, f'{r}AU', '1D_static.dat')
+        sd = pd.read_table(static_file, sep=r"\s+", comment='!', header=None, engine='python')
+        sd.columns = static_columns
+        all_static.append(sd)
+
+    nbz_max = max(len(sd) for sd in all_static)
+
+    # Build arrays; NaN for cells above the truncation height of each radius
+    data_map = np.full((ngrains, nbz_max, len(rchem)), np.nan)
+    zz = np.zeros((nbz_max, len(rchem)))
 
     for idx, r in enumerate(rchem):
-        # Read static for nH and z
-        static_file = os.path.join(chempath, f'{r}AU', '1D_static.dat')
-        static_data = pd.read_table(static_file, sep=r"\s+", comment='!', header=None, engine='python')
-        static_data.columns = static_columns
-        nH = static_data['nH'].values
-        zz[:, idx] = static_data['z'].values
+        static_data = all_static[idx]
+        nbz_r = len(static_data)
+        start = nbz_max - nbz_r       # top rows belong to the truncated surface
+        nH    = static_data['nH'].values
+        z_col = static_data['z'].values
+        zz[start:, idx] = z_col
+        # Extrapolate z above the truncation so pcolormesh has valid coordinates
+        if start > 0:
+            dz = (z_col[0] - z_col[1]) if nbz_r > 1 else z_col[0] * 0.1
+            zz[:start, idx] = z_col[0] + np.arange(start, 0, -1) * dz
 
         # Read grain_sizes
         gs_file = os.path.join(chempath, f'{r}AU', '1D_grain_sizes.in')
@@ -1011,19 +1036,19 @@ def nmgc_grainsizes(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, 
                 if not stripped:
                     continue
                 gs_lines.append([float(v) for v in stripped.split()])
-        gs_array = np.array(gs_lines)  # (nbz, 4*ngrains)
+        gs_array = np.array(gs_lines)  # (nbz_r, 4*ngrains)
 
-        inv_ab = gs_array[:, ngrains:2*ngrains]       # (nbz, ngrains)
-        Td     = gs_array[:, 2*ngrains:3*ngrains]     # (nbz, ngrains)
+        inv_ab = gs_array[:, ngrains:2*ngrains]       # (nbz_r, ngrains)
+        Td     = gs_array[:, 2*ngrains:3*ngrains]     # (nbz_r, ngrains)
 
         if quantity == 'Td':
             for ig in range(ngrains):
-                data_map[ig, :, idx] = Td[:, ig]
+                data_map[ig, start:, idx] = Td[:, ig]
         elif quantity == 'nd':
             for ig in range(ngrains):
-                data_map[ig, :, idx] = nH / inv_ab[:, ig]
+                data_map[ig, start:, idx] = nH / inv_ab[:, ig]
 
-    rr, _ = np.meshgrid(rchem, np.arange(nbz))
+    rr, _ = np.meshgrid(rchem, np.arange(nbz_max))
 
     # Layout
     ncols_plot = min(ngrains, 4)

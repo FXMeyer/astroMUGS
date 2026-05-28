@@ -339,6 +339,24 @@ class Pipeline:
         nautilus.run.run(chempath=self.chempath, nmgc_cmd=self.nmgc_cmd,
                          verbose=verbose, timelimit=timelimit)
 
+    def run_chemistry_custompath(self, custom_path, verbose=True, timelimit=None):
+        """Run the NMGC gas-grain chemistry simulation.
+
+        Calls ``nmgc run`` in ``custom_path``, which must already contain
+        all required NMGC input files. Set ``self.nmgc_cmd`` beforehand if
+        the ``nmgc`` binary is not on PATH.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+            If True, NMGC output streams to the terminal. If False, it is
+            redirected to ``<chempath>/nmgc.out``. Default is True.
+        timelimit : float or None, optional
+            Timeout in seconds. None means no timeout. Default is None.
+        """
+        nautilus.run.run(chempath=custom_path, nmgc_cmd=self.nmgc_cmd,
+                         verbose=verbose, timelimit=timelimit)
+    
 
     def run_localfield_radmc3d(self, nphot_mono=None, verbose=True, timelimit=7200):
         """Run the RADMC-3D monochromatic Monte Carlo for the local radiation field.

@@ -617,8 +617,12 @@ class Pipeline:
         abundances : str, optional
             Initial abundances preset name (e.g., 'atomic'). Default is
             'atomic' for solar-composition. It can also be a filepath.
-        network : bool, optional
-            Write the chemical network file. Default is True.
+        network : bool or str, optional
+            Controls network file copying. ``False`` skips it entirely.
+            ``True`` (default) copies from the built-in
+            ``astromugs/nautilus/network/`` directory. A string path copies
+            from that directory instead (e.g.
+            ``network='/path/to/my_network'``).
         multi_grain : bool, optional
             If True, use multi-grain chemistry mode (NMGC). Default is
             True.
@@ -865,7 +869,8 @@ class Pipeline:
                     print('WARNING: multi_grain = True, but the model has only one grain bin. Please, check the number of grain size or switch multi_grain to False.')
 
             nautilus.write.abundances(path, abundances)
-            if network == True:
-                nautilus.write.network(path)
+            if network:
+                network_path = network if isinstance(network, str) else None
+                nautilus.write.network(path, network_path=network_path)
             if element == True:
                 nautilus.write.elements(path)

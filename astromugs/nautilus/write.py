@@ -880,16 +880,20 @@ def static(path, dist, gas_density,
     np.savetxt(path+'1D_static.dat', static_array, fmt='%.5E', delimiter='   ', newline='\n', header=header_static , comments='! ', encoding=None)
     return len(distance)    # actual spatial_resolution for nautilus.in
 
-def network(path):
+def network(path, network_path=None):
     """Copy the chemical network files to the simulation directory.
 
     Copies gas and grain species lists, reaction networks, activation
-    energies, and surface parameters from the default network directory.
+    energies, and surface parameters from either the built-in default
+    network directory or a user-supplied path.
 
     Parameters
     ----------
     path : str
         Destination directory path for the network files.
+    network_path : str or None, optional
+        Source directory containing the network files. If None (default),
+        uses the built-in ``astromugs/nautilus/network/`` directory.
 
     Notes
     -----
@@ -897,12 +901,11 @@ def network(path):
     ``grain_species.in``, ``gas_reactions.in``, ``grain_reactions.in``,
     ``activation_energies.in``, and ``surface_parameters.in``.
     """
-    copy("astromugs/nautilus/network/gas_species.in", path + "gas_species.in")
-    copy("astromugs/nautilus/network/grain_species.in", path + "grain_species.in")
-    copy("astromugs/nautilus/network/gas_reactions.in", path + "gas_reactions.in")
-    copy("astromugs/nautilus/network/grain_reactions.in", path + "grain_reactions.in")
-    copy("astromugs/nautilus/network/activation_energies.in", path + "activation_energies.in")
-    copy("astromugs/nautilus/network/surface_parameters.in", path + "surface_parameters.in")
+    import os
+    src = network_path if network_path is not None else "astromugs/nautilus/network"
+    for fname in ["gas_species.in", "grain_species.in", "gas_reactions.in",
+                  "grain_reactions.in", "activation_energies.in", "surface_parameters.in"]:
+        copy(os.path.join(src, fname), path + fname)
 
 def elements(path):
     """Write the element list input file for Nautilus.

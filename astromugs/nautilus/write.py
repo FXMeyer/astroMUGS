@@ -564,7 +564,7 @@ def parameters_nmgc(path, resolution, phase=1, \
     f.write("minimum_initial_abundance =  {0:.3E} ! default minimum initial fraction abundance\n".format(minimum_initial_abundance))
     f.close()
 
-def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, cut_cap=True, dtogas=1e-2, rho_m=2.5):
+def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, cut_cap=True, max_inv_ab=1e25, exclude_bins=None, dtogas=1e-2, rho_m=2.5):
     """Write the multi-grain size input files for Nautilus.
 
     Generates the ``1D_grain_sizes.in`` file containing grain radii, inverse
@@ -589,6 +589,21 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
         shape (n_sizes, n_z).
     min_gas_density : float, optional
         Floor value for gas density [cm^-3].
+    cut_cap : bool, optional
+        If True (default), truncate surface points below min_gas_density.
+        If False, apply a floor instead.
+    max_inv_ab : float, optional
+        Maximum allowed value of nH/nd (inverse grain abundance) for any
+        bin and spatial point. Default is 1e25, corresponding to a grain
+        abundance of 1e-25 relative to H. Bins depleted by drift can reach
+        values of 1e30+, which creates extreme dynamic range in the Nautilus
+        ODE Jacobian and slows convergence without adding physical information.
+    exclude_bins : list of int or None, optional
+        1-indexed list of grain size bins to exclude from the output entirely.
+        Applied identically at every radius so the bin structure stays
+        consistent across the grid. Example: ``exclude_bins=[8, 9, 10]``
+        drops the three largest bins (typically the most drift-depleted).
+        Default is None (all bins kept).
     dtogas : float, optional
         Dust-to-gas mass ratio.
     rho_m : float, optional
@@ -615,24 +630,31 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
         # Floor: keep all points, clamp density to min_gas_density
         nh = np.maximum(gas_density, min_gas_density)
 
-    nb_grains = len(sizes[-1])
+    nb_grains_orig = len(sizes[-1])
+
+    # Build list of 0-indexed bins to write (exclude_bins uses 1-based indexing)
+    excluded = set(b - 1 for b in exclude_bins) if exclude_bins is not None else set()
+    keep_bins = [ai for ai in range(nb_grains_orig) if ai not in excluded]
+    nb_grains = len(keep_bins)
+
     f = open(path + '1D_grain_sizes.in',"w")
     f.write('! grain-radius [cm] 1/abundance  grain-temp CR-peak-Temperaturegrain[K] spatial-point\n')
     f.write('\n')
     for zi in range(len(gas_density)):
-        for ai, a in enumerate(sizes[-1]*1e-4):
-            f.write('%10.4E ' %a)
+        for ai in keep_bins:
+            f.write('%10.4E ' %(sizes[-1][ai]*1e-4))
         f.write('    ')
-        for ai, a in enumerate(sizes[-1]):
-            grain_mass = (4./3.) * np.pi * rho_m * (a*1e-4)**3
-            min_dust_nd = dtogas * mu * amu * min_gas_density / (grain_mass * nb_grains)
-            inv_ab = nh[zi]/max(dust_density[ai, zi], min_dust_nd)
+        for ai in keep_bins:
+            a = sizes[-1][ai]
+            grain_mass  = (4./3.) * np.pi * rho_m * (a*1e-4)**3
+            min_dust_nd = dtogas * mu * amu * min_gas_density / (grain_mass * nb_grains_orig)
+            inv_ab = min(nh[zi] / max(dust_density[ai, zi], min_dust_nd), max_inv_ab)
             f.write('%12.6E ' %inv_ab)
         f.write('    ')
-        for ai, a in enumerate(sizes[-1]):
+        for ai in keep_bins:
             f.write('%12.6E ' %T_dust[ai, zi])
         f.write('    ')
-        for ai, a in enumerate(sizes[-1]):
+        for ai in keep_bins:
             f.write('73 ')
         f.write('            !         %d'%(zi+1))
         f.write('\n')
@@ -640,7 +662,7 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
 
     f = open(path + 'temperatures.dat',"w")
     for zi in range(len(gas_density)):
-        for ai, a in enumerate(sizes[-1]):
+        for ai in keep_bins:
             f.write('%12.6E ' %T_dust[ai, zi])
         f.write('\n')
     f.close()

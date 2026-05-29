@@ -559,6 +559,8 @@ class Pipeline:
                        max_uv=None,
                        cap_uv_floor=True,
                        cut_cap=True,
+                       max_inv_ab=1e25,
+                       exclude_bins=None,
                        temp_gas='dust',
                        static=True,
                        param=True,
@@ -882,7 +884,7 @@ class Pipeline:
                     elif coupling_dens == True:
                         nH = n_gas[idx, :]
                         nd = n_dust[:, idx, :]
-                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density, cut_cap=cut_cap, rho_m=rho_m)
+                    nautilus.write.grain_sizes(path, sizes, nH, nd, T_dust[:,idx,:], min_gas_density=min_gas_density, cut_cap=cut_cap, max_inv_ab=max_inv_ab, exclude_bins=exclude_bins, rho_m=rho_m)
                 else:
                     print('WARNING: multi_grain = True, but the model has only one grain bin. Please, check the number of grain size or switch multi_grain to False.')
 

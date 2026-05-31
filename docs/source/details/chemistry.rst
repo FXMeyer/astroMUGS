@@ -21,7 +21,7 @@ Step 1 — Add a dust model
    the dust-to-gas abundance ratios written to ``1D_static.dat`` and
    ``1D_grain_sizes.in``.
 
-Use :class:`~astromugs.dust.CustomDistrib` to load grain sizes from a file (e.g.
+Use :class:`~astromugs.dust.CustomDistrib` or :class:`~astromugs.dust.MRNDistrib`to load grain sizes from a file (e.g.
 produced by a DustPy simulation) and register the model on the grid:
 
 .. code-block:: python

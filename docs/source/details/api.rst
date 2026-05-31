@@ -4,6 +4,18 @@ API Reference
 Complete API reference for all astroMUGS modules.
 
 
+Pipeline
+========
+
+.. autosummary::
+   :toctree: _autosummary
+   :recursive:
+
+   astromugs.pipeline.Interface
+   astromugs.pipeline.Pipeline
+   astromugs.pipeline.Grid
+
+
 Modeling
 ========
 
@@ -11,10 +23,7 @@ Modeling
    :toctree: _autosummary
    :recursive:
 
-   astromugs.modeling.Model
-   astromugs.modeling.Grid
    astromugs.modeling.Disk
-   astromugs.modeling.Interface
    astromugs.modeling.Star
    astromugs.modeling.Envelope
 

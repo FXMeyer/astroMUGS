@@ -257,19 +257,32 @@ class Interface(Pipeline):
         radii = [int(d.replace('AU', '')) for d in au_folders]
         self.grid.add_existingchemradii(radii)
 
-        # Read species names from the first radius folder
-        first_path = os.path.join(chempath, au_folders[0])
-        species_names = nautilus.read.species_names(first_path)
+        # Read species names from the first folder that has completed output
+        species_names = None
+        for folder in au_folders:
+            candidate = os.path.join(chempath, folder)
+            if (os.path.isfile(os.path.join(candidate, 'species.out')) and
+                    os.path.isfile(os.path.join(candidate, 'abundances.out'))):
+                species_names = nautilus.read.species_names(candidate)
+                break
+
+        if species_names is None:
+            print('[add_chemistry] no completed radius found (species.out / abundances.out missing in all folders).')
+            self.chemistry = {}
+            return
 
         self.chemistry = {}
 
         for radius, folder in zip(radii, au_folders):
             folder_path = os.path.join(chempath, folder)
+            ab_path = os.path.join(folder_path, 'abundances.out')
+
+            if not os.path.isfile(ab_path):
+                print(f'  [add_chemistry] skipping {folder}: abundances.out not found')
+                continue
 
             # Read binary output
-            chem = nautilus.read.abundances_binary(
-                os.path.join(folder_path, 'abundances.out')
-            )
+            chem = nautilus.read.abundances_binary(ab_path)
             chem['species'] = species_names
             chem['abundances'] = xr.DataArray(
                 chem['abundances'],

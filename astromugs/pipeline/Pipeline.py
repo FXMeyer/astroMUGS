@@ -559,7 +559,7 @@ class Pipeline:
                        max_uv=None,
                        cap_uv_floor=True,
                        cut_cap=True,
-                       max_inv_ab=1e25,
+                       max_inv_ab=None,
                        exclude_bins=None,
                        temp_gas='dust',
                        static=True,

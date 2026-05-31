@@ -242,6 +242,91 @@ def abundances_binary(path):
     }
 
 
+def progress(path, parameters_path=None):
+    """Return the current progress of a running or completed Nautilus job.
+
+    Reads only the 8-byte time record from each timestep and seeks past
+    the large physical-state and abundance records, so it is fast even
+    for big files.
+
+    Parameters
+    ----------
+    path : str
+        Path to the ``abundances.out`` binary file (or its parent directory;
+        ``abundances.out`` is appended automatically if *path* is a directory).
+    parameters_path : str or None, optional
+        Path to ``parameters.in`` (or its parent directory). If supplied,
+        the total expected number of outputs is read from the file and a
+        percentage is printed. Default is None.
+
+    Returns
+    -------
+    n_done : int
+        Number of timesteps written so far.
+    times_yr : ndarray
+        Time of each completed timestep in years.
+
+    Examples
+    --------
+    >>> n, t = nautilus.read.progress('chemistry/30AU/')
+    Timesteps done: 45 / 64  (70.3 %)   last time: 3.16e+05 yr
+    """
+    import struct
+
+    if os.path.isdir(path):
+        path = os.path.join(path, 'abundances.out')
+
+    filesize = os.path.getsize(path)
+    if filesize == 0:
+        return 0, np.array([])
+
+    # ── Calibrate bytes_per_timestep from the first record ──────────────────
+    # Fortran unformatted records: [4-byte marker][data][4-byte marker]
+    with open(path, 'rb') as f:
+        n1 = struct.unpack('i', f.read(4))[0]; f.seek(n1, 1); f.read(4)  # time
+        n2 = struct.unpack('i', f.read(4))[0]; f.seek(n2, 1); f.read(4)  # phys
+        n3 = struct.unpack('i', f.read(4))[0]; f.seek(n3, 1); f.read(4)  # abundances
+        bytes_per_ts = f.tell()
+
+    n_done = filesize // bytes_per_ts
+
+    # ── Read only the time records (8 bytes each, seek past the rest) ────────
+    yr = 365.25 * 24 * 3600
+    times = np.empty(n_done)
+    with open(path, 'rb') as f:
+        for i in range(n_done):
+            n = struct.unpack('i', f.read(4))[0]
+            times[i] = struct.unpack('d', f.read(n))[0]
+            f.read(4)
+            n2 = struct.unpack('i', f.read(4))[0]; f.seek(n2, 1); f.read(4)
+            n3 = struct.unpack('i', f.read(4))[0]; f.seek(n3, 1); f.read(4)
+
+    times_yr = times / yr
+
+    # ── Print summary ─────────────────────────────────────────────────────────
+    nb_outputs = None
+    if parameters_path is not None:
+        if os.path.isdir(parameters_path):
+            parameters_path = os.path.join(parameters_path, 'parameters.in')
+        with open(parameters_path, 'r') as f:
+            for line in f:
+                if line.strip().startswith('nb_outputs'):
+                    nb_outputs = int(line.split('=')[1].split('!')[0].strip())
+                    break
+
+    if nb_outputs is not None:
+        pct = 100.0 * n_done / nb_outputs
+        print(f'Timesteps done: {n_done} / {nb_outputs}  ({pct:.1f} %)   '
+              f'last time: {times_yr[-1]:.3e} yr' if n_done > 0 else
+              f'Timesteps done: 0 / {nb_outputs}  (0.0 %)')
+    else:
+        msg = (f'Timesteps done: {n_done}   last time: {times_yr[-1]:.3e} yr'
+               if n_done > 0 else 'Timesteps done: 0')
+        print(msg)
+
+    return n_done, times_yr
+
+
 def rates_binary(path, spatial_resolution=1):
     """Read the NMGC binary reaction rates output file.
 

@@ -564,7 +564,7 @@ def parameters_nmgc(path, resolution, phase=1, \
     f.write("minimum_initial_abundance =  {0:.3E} ! default minimum initial fraction abundance\n".format(minimum_initial_abundance))
     f.close()
 
-def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, cut_cap=True, max_inv_ab=1e25, exclude_bins=None, dtogas=1e-2, rho_m=2.5):
+def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=1e0, cut_cap=True, max_inv_ab=None, exclude_bins=None, dtogas=1e-2, rho_m=2.5):
     """Write the multi-grain size input files for Nautilus.
 
     Generates the ``1D_grain_sizes.in`` file containing grain radii, inverse
@@ -648,7 +648,9 @@ def grain_sizes(path, sizes, gas_density, dust_density, T_dust, min_gas_density=
             a = sizes[-1][ai]
             grain_mass  = (4./3.) * np.pi * rho_m * (a*1e-4)**3
             min_dust_nd = dtogas * mu * amu * min_gas_density / (grain_mass * nb_grains_orig)
-            inv_ab = min(nh[zi] / max(dust_density[ai, zi], min_dust_nd), max_inv_ab)
+            inv_ab = nh[zi] / max(dust_density[ai, zi], min_dust_nd)
+            if max_inv_ab is not None:
+                inv_ab = min(inv_ab, max_inv_ab)
             f.write('%12.6E ' %inv_ab)
         f.write('    ')
         for ai in keep_bins:

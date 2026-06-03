@@ -247,30 +247,47 @@ def lines(species='CO', format='leiden', thermpath='thermal/'):
 
 
 def gas_velocity(star_mass, r, theta, phi, object="disk", thermpath='thermal/'):
-    '''
-    Desc: write gas_velocity.inp
-    Args: species, format
-    '''
+    """Write ``gas_velocity.inp`` for RADMC-3D line transfer (Keplerian disk).
 
+    Computes the Keplerian azimuthal velocity at each grid cell and writes
+    it in the spherical-coordinate velocity format expected by RADMC-3D:
+    ``(v_r, v_theta, v_phi)`` in cm s\ :sup:`-1`. For a Keplerian disk
+    ``v_r = v_theta = 0`` and ``v_phi = sqrt(G M_star / R_cyl)`` where
+    ``R_cyl = r sin(theta)`` is the cylindrical radius.
+
+    Parameters
+    ----------
+    star_mass : float
+        Stellar mass in solar masses.
+    r : array_like
+        Spherical radial cell centres **in AU**.
+    theta : array_like
+        Co-latitude cell centres in radians.
+    phi : array_like
+        Azimuthal cell centres in radians.
+    object : str, optional
+        Reserved for future use (e.g. envelope kinematics). Default is
+        ``'disk'``.
+    thermpath : str, optional
+        Output directory. Default is ``'thermal/'``.
+    """
     nr, ntheta, nphi = len(r), len(theta), len(phi)
-    print(nr, ntheta, nphi)
-    # Create 3D grids
-    rr, tt, pp = np.meshgrid(r*autocm, theta, phi, indexing='ij')
 
-    # Keplerian azimuthal velocity
-    vphi = np.sqrt(Ggram * star_mass*M_sun / rr)
+    # 3-D spherical grids; rr in cm
+    rr, tt, _ = np.meshgrid(r * autocm, theta, phi, indexing='ij')
 
-    # Convert to Cartesian
-    vx = -vphi * np.sin(pp)
-    vy =  np.zeros_like(vx)
-    vz = vphi * np.cos(pp)
+    # Cylindrical radius R_cyl = r * sin(theta) [cm]
+    R_cyl = rr * np.sin(tt)
 
-    # Write to file
+    # Keplerian azimuthal velocity v_phi = sqrt(G M / R_cyl) [cm/s]
+    vphi = np.sqrt(Ggram * star_mass * M_sun / R_cyl)
+
+    # RADMC-3D spherical-grid format: one line per cell with (v_r, v_theta, v_phi)
+    # Keplerian rotation: v_r = 0, v_theta = 0, v_phi = v_K
     with open(thermpath + 'gas_velocity.inp', 'w') as f:
-        f.write("1\n")  # iformat = 1 (ASCII)
-        f.write(f"{nr*ntheta*nphi}\n")
-
+        f.write("1\n")                           # iformat
+        f.write(f"{nr * ntheta * nphi}\n")
         for k in range(nphi):
             for j in range(ntheta):
                 for i in range(nr):
-                    f.write(f"{vx[i,j,k]:.6e} {vy[i,j,k]:.6e} {vz[i,j,k]:.6e}\n")
+                    f.write(f"0.0e+00 0.0e+00 {vphi[i,j,k]:.6e}\n")

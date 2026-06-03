@@ -855,6 +855,106 @@ def image_vertical_cut(pathfile='thermal/', distance=100, xlim=None, ylim=None,
 
     plt.show()
 
+def numberdens(species='CO', path='thermal/', vmin=1e0, vmax=1e8, cmap='gnuplot2',
+               ncols=3, xlim=None, ylim=None, figsize=None,
+               save=False, savename='numberdens.pdf'):
+    """Plot 2D maps of molecular number densities from ``numberdens_XXX.inp`` files.
+
+    Accepts a single species name or a list of names. Multiple species are
+    displayed as a mosaic of subplots sharing the same colour scale.
+
+    Parameters
+    ----------
+    species : str or list of str, optional
+        Species name(s) matching ``numberdens_<species>.inp`` files.
+        Default is ``'CO'``.
+    path : str, optional
+        Path to the directory containing the RADMC-3D files. Default is
+        ``'thermal/'``.
+    vmin, vmax : float, optional
+        Shared colour scale limits [cm :sup:`-3`]. Default is ``1e0``
+        and ``1e8``.
+    cmap : str, optional
+        Colormap name. Default is ``'gnuplot2'``.
+    ncols : int, optional
+        Maximum number of columns in the mosaic. Default is ``3``.
+    xlim, ylim : tuple, optional
+        Axis limits (R, Z) in AU applied to every panel.
+    figsize : tuple or None, optional
+        Figure size. If None, computed automatically from ``ncols`` and
+        the number of rows.
+    save : bool, optional
+        Save the figure to ``savename``. Default is False.
+    savename : str, optional
+        Output filename when ``save=True``. Default is ``'numberdens.pdf'``.
+    """
+    species_list = [species] if isinstance(species, str) else list(species)
+    nspecies = len(species_list)
+
+    # --- Grid: cell centres (shape nt × nr) — required for shading='gouraud' ---
+    grid = pd.read_table(path + 'amr_grid.inp', engine='python', skiprows=5)
+    nr = int(grid.columns[0].split("  ")[0])
+    nt = int(grid.columns[0].split("  ")[1])
+    grid = np.array(grid[grid.columns[0]].values, copy=True)
+
+    r_edge     = grid[:nr+1] / autocm
+    theta_edge = grid[nr+1:nr+1+nt+1]
+    theta_edge[-1] = np.pi
+    r_cen     = 0.5 * (r_edge[:-1]     + r_edge[1:])
+    theta_cen = 0.5 * (theta_edge[:-1] + theta_edge[1:])
+    rr, tt = np.meshgrid(r_cen, theta_cen)          # (nt, nr)
+    R = rr * np.sin(tt)
+    Z = rr * np.cos(tt)
+
+    # --- Layout ---
+    ncols = min(ncols, nspecies)
+    nrows = int(np.ceil(nspecies / ncols))
+    if figsize is None:
+        figsize = (5 * ncols + 1, 4 * nrows)
+
+    norm = LogNorm(vmin=vmin, vmax=vmax)
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize,
+                             sharex=True, sharey=True)
+    axes = np.atleast_1d(axes).ravel()
+
+    im = None
+    for idx, sp in enumerate(species_list):
+        ax = axes[idx]
+        nd = pd.read_table(path + f'numberdens_{sp}.inp',
+                           engine='python', header=None, skiprows=2)
+        nd = nd[0].values.reshape(nt, nr)
+        nd = np.where(nd <= 0, 1e-100, nd)
+
+        im = ax.pcolormesh(R, Z, nd, cmap=cmap, shading='gouraud',
+                           norm=norm, rasterized=True)
+        ax.set_title(sp, fontsize=13)
+        ax.tick_params(labelsize=12)
+        if xlim:
+            ax.set_xlim(xlim)
+        if ylim:
+            ax.set_ylim(ylim)
+
+    # Hide unused panels
+    for idx in range(nspecies, len(axes)):
+        axes[idx].set_visible(False)
+
+    # Shared axis labels
+    for ax in axes[(nrows - 1) * ncols:]:
+        ax.set_xlabel('R [au]', fontsize=13)
+    for i in range(nrows):
+        axes[i * ncols].set_ylabel('Z [au]', fontsize=13)
+
+    # Single shared colorbar on the right
+    fig.subplots_adjust(right=0.88, hspace=0.15, wspace=0.08)
+    cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
+    fig.colorbar(im, cax=cbar_ax, label=r'$n$ [cm$^{-3}$]')
+
+    if save:
+        fig.savefig(savename, bbox_inches='tight')
+
+    plt.show()
+
+
 def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='gnuplot2',
            xlim=None, ylim=None, figsize=(6, 6), save=False, savename='filename.pdf'):
     """Plot a 2D map of a column from the 1D_static.dat files.

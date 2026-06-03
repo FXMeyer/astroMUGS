@@ -255,10 +255,10 @@ class Pipeline:
             sys.exit(1)  # Exit the program with a non-zero status to indicate an error
 
         if numberdens==True:
-            # r_naut, zz_naut, dens_mol_nautilus = nautilus.read.abundance(path=path, itime=itime, species=species) #read abundances of chosen species from Nautilus output files.
-            #numberdens_sph = nautilus.coupling.to_spherical(dens_mol_nautilus, nx, ny, nz, x, y, r_naut, zz_naut) #convert abundances into spherical grid.
-            numberdens_sph = nautilus.coupling.to_spherical(self.grid.chemmodel[species], nx, ny, x, y, struct='numberdens_species') #convert abundances into spherical grid.
-            radmc3d.write.numberdens_mol(numberdens_sph, species=species, gridstyle="regular", thermpath=thermpath) #write numberdens_mol.inp file for RADMC-3D.
+            species_list = [species] if isinstance(species, str) else list(species)
+            for sp in species_list:
+                numberdens_sph = nautilus.coupling.to_spherical(self.grid.chemmodel[sp], nx, ny, x, y, struct='numberdens_species')
+                radmc3d.write.numberdens_mol(numberdens_sph, species=sp, gridstyle="regular", thermpath=thermpath)
 
         if dust_density==True:
             print('create dust_density.inp')
@@ -660,8 +660,79 @@ class Pipeline:
             If True, compute visual extinction from the local radiation
             field. Default is True.
         **keywords
-            Additional keyword arguments forwarded to
-            ``nautilus.write.parameters_nmgc``.
+            Any keyword argument accepted by
+            :func:`~astromugs.nautilus.write.parameters_nmgc` can be passed
+            here and will be forwarded verbatim to that function. This lets
+            you override any entry in the ``parameters.in`` file without
+            subclassing. See *Other Parameters* below for the full list.
+
+        Other Parameters
+        ----------------
+        phase : int, optional
+            Chemical phase model. ``0`` = 2-phase, ``1`` = 3-phase
+            (default ``1``).
+        cr_ionisation_rate : float, optional
+            Cosmic-ray ionisation rate [s⁻¹]. Default ``1.3e-17``.
+        x_ionisation_rate : float, optional
+            X-ray ionisation rate [s⁻¹]. Default ``0.0``.
+        is_photodesorb : int, optional
+            Photodesorption of ices: ``1`` = on (default), ``0`` = off.
+        is_crid : int, optional
+            Cosmic-ray induced diffusion (CRID): ``1`` = on, ``0`` = off
+            (default).
+        is_er_cir : int, optional
+            Eley-Rideal and complex-induced reactions: ``1`` = on, ``0`` = off
+            (default).
+        is_absorption_h2 : int, optional
+            H₂ self-shielding (Lee & Herbst 1996): ``1`` = on (default).
+        is_absorption_co : int, optional
+            CO self-shielding method. ``1`` = Lee & Herbst (1996),
+            ``2`` = Visser et al. (2009) (default ``2``).
+        is_absorption_n2 : int, optional
+            N₂ self-shielding (Li et al. 2013): ``1`` = on (default).
+        nb_active_lay : float, optional
+            Number of chemically active grain surface layers. Default ``2.0``.
+        diff_binding_ratio_surf : float, optional
+            Ratio of diffusion barrier to binding energy for surface species.
+            Default ``0.4``.
+        diff_binding_ratio_mant : float, optional
+            Ratio of diffusion barrier to binding energy for mantle species.
+            Default ``0.8``.
+        cr_peak_grain_temp : float, optional
+            Peak grain temperature reached during a cosmic-ray heating event
+            [K]. Default ``70.0``.
+        cr_peak_duration : float, optional
+            Duration of a cosmic-ray heating peak [s]. Default ``1e-5``.
+        Fe_ionisation_rate : float, optional
+            Cosmic Fe-ion–grain encounter rate [s⁻¹ grain⁻¹]. Default
+            ``3e-14``.
+        sticking_coeff_neutral : float, optional
+            Sticking coefficient for neutral species. Default ``1.0``.
+        sticking_coeff_positive : float, optional
+            Sticking coefficient for positively charged species. Default
+            ``0.0``.
+        sticking_coeff_negative : float, optional
+            Sticking coefficient for negatively charged species. Default
+            ``0.0``.
+        surface_site_density : float, optional
+            Surface site density on a grain [cm⁻²]. Default ``8e14``.
+        chemical_barrier_thickness : float, optional
+            Grain reaction activation energy barrier width [cm]. Default
+            ``1e-8``.
+        relative_tolerance : float, optional
+            Relative tolerance of the ODE solver. Default ``1e-4``.
+        output_type : str, optional
+            Output time spacing: ``'log'`` (default) or ``'linear'``.
+        start_time : float, optional
+            First output time [yr]. Default ``1.0``.
+        modify_rate_flag : int, optional
+            Rate modification flag. ``0`` = none (default), ``1`` = H only,
+            ``2`` = H + H₂, ``3`` = all species.
+        ED_H2 : float, optional
+            H₂ binding energy on itself [K]. Default ``23.0``.
+        vib_to_dissip_freq_ratio : float, optional
+            Ratio of surface-bond vibrational frequency to energy dissipation
+            frequency (RRK desorption mechanism). Default ``1e-2``.
         """
 
         #-----------------------------------------

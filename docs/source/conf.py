@@ -65,6 +65,7 @@ autosummary_generate = True
 autodoc_member_order = 'bysource'
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
+napoleon_use_param = False        # keeps Parameters / Other Parameters as separate visible sections
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),

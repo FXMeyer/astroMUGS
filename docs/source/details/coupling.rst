@@ -2,14 +2,22 @@ RADMC3D -- Nautilus coupling
 ****************************
 
 The ``nautilus.coupling`` module handles the coordinate transformation and interpolation
-between the RADMC3D spherical grid and the Nautilus cylindrical chemistry grid.
+between the RADMC3D spherical grid and the Nautilus Cartesian chemistry grid.
 
 Overview
 ========
 
 RADMC3D operates on a spherical grid :math:`(r, \theta, \phi)`, while Nautilus uses
-a cylindrical grid :math:`(R, z)`. The coupling functions remap physical quantities
-(density, temperature, UV extinction) from one grid to the other.
+a Cartesian grid :math:`(R, z)`. The full workflow has two directions:
+
+1. **RADMC3D → Nautilus** (pre-chemistry): physical quantities (density, temperature,
+   UV field, visual extinction) are remapped from the spherical RT grid onto the
+   Cartesian chemistry columns and written as Nautilus input files by
+   ``write_nautilus()``.
+
+2. **Nautilus → RADMC3D** (post-chemistry): chemical abundances from the completed
+   Nautilus run are converted back to number densities on the spherical RT grid and
+   written as ``numberdens_XXX.inp`` files for line radiative transfer with RADMC3D.
 
 The main coupling functions are:
 
@@ -22,7 +30,7 @@ The main coupling functions are:
 Coordinate conversion
 =====================
 
-For a point at cylindrical coordinates :math:`(R, z)`, the corresponding spherical coordinates are:
+For a point at Cartesian coordinates :math:`(R, z)`, the corresponding spherical coordinates are:
 
 .. math::
 
@@ -35,8 +43,11 @@ For a point at cylindrical coordinates :math:`(R, z)`, the corresponding spheric
    convert internally using ``autocm`` (AU to cm conversion factor).
 
 
+Converting RADMC-3D to Nautilus input files
+===========================================
+
 Density coupling
-================
+----------------
 
 ``dust_density`` uses bilinear interpolation (``RegularGridInterpolator``) to remap
 RADMC3D dust densities onto the chemistry grid. For each grain size:
@@ -50,7 +61,7 @@ surface density profile.
 
 
 Temperature coupling
-====================
+--------------------
 
 Two variants exist:
 
@@ -61,7 +72,7 @@ Both use bilinear interpolation (``RegularGridInterpolator``) similarly to the d
 
 
 UV extinction coupling
-======================
+----------------------
 
 ``av_z`` computes the visual extinction by comparing the local UV radiation field
 (from RADMC3D's ``local_field``) to the unattenuated blackbody spectrum. The extinction
@@ -70,6 +81,70 @@ in magnitudes is:
 .. math::
 
    A_V = -2.5 \log_{10}\left(\frac{F_\mathrm{local}}{F_\mathrm{unattenuated}}\right)
+
+
+Converting Nautilus abundances back to RADMC-3D
+================================================
+
+After your Nautilus simulation has completed, use ``add_chemistry()`` followed by
+``convert_nautilus2radmc()`` to create the ``numberdens_XXX.inp`` files that RADMC-3D
+needs for line radiative transfer.
+
+.. code-block:: python
+
+    import astromugs.pipeline as pipeline
+
+    pipe1 = pipeline.Interface()
+    pipe1.add_thermal_path(thermpath)   # path to the RADMC-3D thermal output directory
+    pipe1.add_chemical_path(chempath)   # path to the Nautilus chemistry directory
+
+    # Load the chemistry output.
+    # itime selects which timestep is used for the conversion (default: -1 = last output).
+    pipe1.add_chemistry(itime=-1)
+
+    # Write numberdens_CO.inp into thermpath
+    pipe1.convert_nautilus2radmc(species='CO', numberdens=True)
+
+    # Multiple species at once
+    pipe1.convert_nautilus2radmc(species=['CO', 'HCO+', 'N2H+'], numberdens=True)
+
+``add_chemistry()`` reads the binary ``abundances.out`` files from all completed
+``XXAU/`` sub-folders, converts fractional abundances to number densities
+(:math:`n_X = n_\mathrm{H} \times (n_X / n_\mathrm{H})` in cm\ :sup:`-3`), and
+stores the result in ``pipe1.grid.chemmodel``, keyed first by species name then by
+radius in AU.
+
+``convert_nautilus2radmc()`` then calls ``nautilus.coupling.to_spherical()`` to
+remap each chemistry column onto the full RADMC-3D spherical grid by **bilinear
+interpolation** (``RegularGridInterpolator``), and writes the result to
+``numberdens_XXX.inp`` in ``thermpath``.
+
+The interpolation works in two steps:
+
+1. Each vertical column (one per radius) is resampled onto a common :math:`z`
+   grid built from the union of all column :math:`z` arrays. This handles the fact
+   that different radii may have different numbers of vertical points after surface
+   truncation (controlled by ``min_gas_density`` in ``write_nautilus()``). Points
+   above a column's truncation height are set to zero; points below the midplane
+   use the midplane value.
+
+2. The resulting regular 2-D field :math:`n_X(R_\mathrm{cyl}, z)` is passed to
+   ``RegularGridInterpolator``, which evaluates it at every spherical cell centre
+   :math:`(d \sin\theta,\, |d \cos\theta|)` in one vectorised call.
+
+.. note::
+
+   The Nautilus chemistry grid typically has far fewer radial points than the
+   RADMC-3D grid. Bilinear interpolation produces smooth abundance maps between
+   chemistry columns, avoiding the step discontinuities that nearest-neighbour
+   assignment would introduce. Cells inside the inner chemistry radius are set
+   to ``1e-20``; cells outside the outermost radius are set to ``0``.
+
+.. note::
+
+   ``add_chemistry()`` silently skips any radius whose ``abundances.out`` is not yet
+   present (e.g. still running on a cluster). You can call it again later and then
+   repeat ``convert_nautilus2radmc()`` once more radii have finished.
 
 
 API Reference

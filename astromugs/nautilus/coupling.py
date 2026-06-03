@@ -567,47 +567,81 @@ def to_spherical(chemmodel, nr, nt, dist, theta, struct='numberdens_species'):
 
     Maps a quantity stored on the Nautilus cylindrical grid (keyed by
     radial position) onto a regular spherical ``(r, theta)`` grid via
-    nearest-neighbor lookup. Points above the disk surface or inside the
-    inner radius receive floor values.
+    bilinear interpolation. Each chemistry column is first interpolated
+    onto a common z grid (built from the union of all column z arrays),
+    producing a regular 2-D field in ``(R_cyl, z)`` that is then passed
+    to :class:`~scipy.interpolate.RegularGridInterpolator`. Points outside
+    the chemistry domain — above the disk surface, beyond the outermost
+    radius, or inside the inner radius — receive floor values.
 
     Parameters
     ----------
     chemmodel : dict
-        Dictionary keyed by cylindrical radius (cm). Each entry is a dict
-        containing ``'z'`` (vertical grid in cm) and the field given by
-        `struct` (e.g., ``'numberdens_species'``).
+        Dictionary keyed by cylindrical radius **in AU** (int or float).
+        Each value is a dict containing:
+
+        - ``'z'``: 1-D array of vertical heights **in AU**, stored
+          surface → midplane (descending order).
+        - the field named by `struct`: 1-D array of the quantity to remap,
+          same length and order as ``'z'``.
+
     nr : int
-        Number of radial points in the output spherical grid.
+        Number of radial cell centres in the output spherical grid.
     nt : int
-        Number of co-latitude points in the output spherical grid.
+        Number of co-latitude cell centres in the output spherical grid.
     dist : numpy.ndarray
-        Spherical radial distance grid, in cm.
+        Spherical radial distance grid (cell centres) **in AU**, shape
+        ``(nr,)``.
     theta : numpy.ndarray
-        Co-latitude grid, in radians.
+        Co-latitude grid (cell centres) **in radians**, shape ``(nt,)``.
     struct : str, optional
-        Key in `chemmodel` entries for the quantity to remap.
+        Key in each ``chemmodel`` entry for the quantity to remap.
         Default is ``'numberdens_species'``.
 
     Returns
     -------
     numpy.ndarray
-        Remapped quantity on the spherical grid with shape ``(nr, nt)``.
+        Remapped quantity on the spherical grid, shape ``(nr, nt)``.
+        Cells inside the inner radius are set to ``1e-20``; cells outside
+        the modelled domain are set to ``0.0``.
     """
-    spherical_struct = np.zeros((nr, nt))
-    r_naut = np.array(list(chemmodel.keys()))
-    rcut = r_naut[0]
-    for id_thet, thet in enumerate(theta):
-        for id_d, d in enumerate(dist):
-            r_sph = d*np.sin(thet)
-            z_sph = abs(d*np.cos(thet))
-            closest_r = min(enumerate(r_naut), key=lambda x: abs(x[1]-r_sph)) #find closest grid point
-            closest_z = min(enumerate(chemmodel[closest_r[1]]['z']), key=lambda x: abs(x[1]-z_sph)) #find closest grid point
-            if z_sph > chemmodel[closest_r[1]]['z'][0] and d > rcut:
-                spherical_struct[id_d, id_thet] = 0.0  # above truncated domain: no chemistry
-            elif d < rcut:
-                spherical_struct[id_d, id_thet] = 1e-20
-            else:
-                spherical_struct[id_d, id_thet] = chemmodel[closest_r[1]][struct][closest_z[0]]
+    # ── 1. Sorted Nautilus radii (AU) ────────────────────────────────────────
+    r_naut = np.array(sorted(chemmodel.keys()), dtype=float)
+    r_inner = r_naut[0]
 
-    return spherical_struct
+    # ── 2. Build a common z grid from the union of all column z arrays ───────
+    # Each column stores z surface→midplane (descending); flip to ascending.
+    z_common = np.unique(np.concatenate([chemmodel[r]['z'] for r in r_naut]))
+    # z_common is already ascending after np.unique (returns sorted values).
+
+    # ── 3. Interpolate every column onto z_common ─────────────────────────────
+    # np.interp requires xp to be ascending, so we flip z (descending→ascending)
+    # and the corresponding values.
+    #   left  = midplane value  (z < lowest z in column → below midplane)
+    #   right = 0.0             (z > highest z in column → above truncation)
+    data_2d = np.zeros((len(r_naut), len(z_common)))
+    for ir, r in enumerate(r_naut):
+        z_asc  = chemmodel[r]['z'][::-1]          # ascending
+        val_asc = chemmodel[r][struct][::-1]       # corresponding values
+        data_2d[ir] = np.interp(z_common, z_asc, val_asc,
+                                left=val_asc[0], right=0.0)
+
+    # ── 4. Build the 2-D interpolator on (R_cyl, z) ──────────────────────────
+    interp = RegularGridInterpolator(
+        (r_naut, z_common), data_2d,
+        method='linear', bounds_error=False, fill_value=0.0
+    )
+
+    # ── 5. Evaluate at all spherical cell centres (vectorised) ───────────────
+    dist_g, theta_g = np.meshgrid(dist, theta, indexing='ij')   # (nr, nt)
+    R_cyl = dist_g * np.sin(theta_g)                            # (nr, nt) AU
+    z_cyl = np.abs(dist_g * np.cos(theta_g))                    # (nr, nt) AU
+
+    query = np.stack([R_cyl.ravel(), z_cyl.ravel()], axis=1)
+    result = interp(query).reshape(nr, nt)
+
+    # Inner-radius cavity: set a small floor instead of 0 to avoid log-scale issues
+    result[dist_g < r_inner] = 1e-20
+
+    return result
 

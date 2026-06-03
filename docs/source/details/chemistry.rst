@@ -176,6 +176,24 @@ Key arguments
    reference under :meth:`~astromugs.pipeline.Pipeline.write_nautilus`. The table
    above covers only the arguments most commonly adjusted in practice.
 
+.. tip::
+
+   ``write_nautilus()`` accepts ``**keywords`` that are forwarded directly to
+   :func:`~astromugs.nautilus.write.parameters_nmgc`, which writes the
+   ``parameters.in`` file. This means you can override **any** Nautilus
+   parameter from your call to ``write_nautilus()`` — for example::
+
+       pipe.write_nautilus(
+           stop_time          = 1e6,
+           multi_grain        = True,
+           cr_ionisation_rate = 1.3e-16,   # 10× standard CR rate
+           is_crid            = 1,          # enable CR-induced diffusion
+           nb_active_lay      = 4.0,        # 4 active surface monolayers
+           phase              = 0,          # 2-phase instead of 3-phase
+       )
+
+   The full list of available keywords is in the *Other Parameters* section of
+   :meth:`~astromugs.pipeline.Pipeline.write_nautilus`.
 
 
 Best practices

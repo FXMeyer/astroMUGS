@@ -7,13 +7,21 @@ Complete API reference for all astroMUGS modules.
 Pipeline
 ========
 
-.. autosummary::
-   :toctree: _autosummary
-   :recursive:
+.. autoclass:: astromugs.pipeline.Interface
+   :members:
+   :inherited-members:
+   :show-inheritance:
+   :undoc-members:
 
-   astromugs.pipeline.Interface
-   astromugs.pipeline.Pipeline
-   astromugs.pipeline.Grid
+.. autoclass:: astromugs.pipeline.Pipeline
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+.. autoclass:: astromugs.pipeline.Grid
+   :members:
+   :show-inheritance:
+   :undoc-members:
 
 
 Modeling

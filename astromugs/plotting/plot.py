@@ -1935,3 +1935,222 @@ def plot_atom_ratio_nautilus(chempath,
         ax.set_ylim(ylim if ylim is not None else (0, max(all_z) * 1.07))
         
         plt.show()
+
+
+def plot_top_contributing_species(chempath,
+                                  main_output_dict,
+                                  target_atom="C",
+                                  itime=-1,
+                                  verbose=True,
+                                  spnumber=5,
+                                  color="darkred"):
+    """
+    Computes the total physical atom budget of a chemical element across a 2D disk 
+    structure and plots the top major molecular reservoirs as a percentage bar chart.
+
+    Because Nautilus inputs provide relative fractional abundances:
+    
+        y_i = n_i / n_H
+        
+    where n_H is the total hydrogen number density, this function reconstructs 
+    the spatial grid cell boundaries from discrete radial paths to calculate 
+    the actual 3D ring volumes ($V = 2\pi R \cdot \Delta R \cdot \Delta z$). 
+    It then derives the absolute number of atoms per cell via:
+    
+        N = y_i \cdot n_H \cdot V \cdot \text{atom\_coefficient}
+        
+    Finally, the total quantities are integrated globally over the entire space, 
+    and the highest-contributing gas-phase species are displayed in a clean, 
+    linear bar chart.
+
+    Parameters
+    ----------
+    chempath : str
+        The path to the parent directory containing the radial simulation 
+        subfolders (e.g., "5AU", "10AU").
+    main_output_dict : dict
+        Master simulation dictionary where keys are radii (int) and values 
+        are sub-dictionaries holding structural grid profiles and chemistry arrays. 
+        Must contain the "H_number_density" profile data.
+    target_atom : str, default "C"
+        The chemical symbol of the element whose budget is being mapped. 
+        Must be present in the allowed element array.
+    itime : int, default -1
+        The specific timestep index of the simulation to analyze. 
+        Defaults to -1 (the final snapshot).
+    verbose : bool, default True
+        If True, prints diagnostic warnings, missing file notifications, 
+        or processing error exceptions to the terminal.
+    spnumber : int, default 5
+        The total number of top contributing molecular species to display 
+        on the resulting bar chart.
+    color : str, default "darkred"
+        Any valid Matplotlib color string used to fill the chart bars.
+
+    Raises
+    ------
+    ValueError
+        If `target_atom` is not one of the supported elements found within 
+        the baseline chemical network list.
+
+    Returns
+    -------
+    None
+        Displays a structured linear Matplotlib bar chart window showing 
+        exact percentage values centered on top of each bar.
+
+    Notes
+    -----
+    - Isomer and structural prefixes like 'c-' and 'l-' are automatically 
+      stripped during chemical formula parsing.
+    - Active surface grain species (e.g., starting with 'J', 'K', or 'GRAIN') 
+      are filtered out to focus purely on gas-phase elemental allocations.
+    - Cell volumes assume an axisymetric, midplane-symmetric system 
+      calculated in cylindrical coordinates ($V$ in $\text{cm}^3$).
+    """
+    
+    allowed_elements = ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 'Mg', 'Cl', 'P', 'F']
+    if target_atom not in allowed_elements:
+        raise ValueError(f"Target atom '{target_atom}' is not recognized in the chemical network.")
+        
+    # --- INTERNAL HELPERS ---
+    def count_target_atom(species_name, target):
+        if species_name == 'e-': return 0
+        formula = species_name.replace('c-', '').replace('l-', '')
+        if formula.endswith('+') or formula.endswith('-'):
+            formula = formula[:-1]
+        pattern = re.compile(r'([A-Z][a-z]?)(-?\d*)')
+        composition = {}
+        for atom, n in pattern.findall(formula):
+            count = int(n) if n else 1
+            composition[atom] = composition.get(atom, 0) + count
+        return composition.get(target, 0)
+
+    def keep_gas_species_only(species_list):
+        motif = re.compile(r'^[JK]\d{2}|^GRAIN')
+        return [sp for sp in species_list if not motif.match(sp)]
+
+    atom_cache = {}
+    global_species_contributions = {}
+    
+    AU_to_cm = 1.496e13  # Conversion factor for volume calculations
+
+    # --- 1. RECONSTRUCT RADIAL EDGES FOR VOLUME ---
+    radii = sorted([int(r) for r in main_output_dict.keys()])
+    if len(radii) == 0:
+        if verbose: print("Main output dictionary is empty.")
+        return
+        
+    if len(radii) > 1:
+        r_midshifts = 0.5 * np.diff(radii)
+        r_edges = [radii[0] - r_midshifts[0]] + [radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [radii[-1] + r_midshifts[-1]]
+
+    # --- 2. DATA ACCUMULATION WITH PHYSICAL VOLUMES ---
+    for i, r_value in enumerate(radii):
+        folder_name = f"{r_value}AU"
+        file_path = os.path.join(chempath, folder_name, "1D_static.dat")
+        
+        if os.path.exists(file_path):
+            try:
+                # Load altitude profile
+                z_points = np.loadtxt(file_path, comments='!', usecols=0)
+                
+                sub_dict = main_output_dict[r_value]
+                abundance_array = sub_dict['abundances']
+                
+                # Fetch nH density profile (assuming 'density' or 'nH' is stored in your sub_dict)
+                nH_profile = sub_dict["H_number_density"][itime,:]
+                
+                # Reconstruct vertical cell edges (dz)
+                if len(z_points) > 1:
+                    z_midshifts = 0.5 * np.diff(z_points)
+                    z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
+                    dz = np.abs(np.diff(z_edges))
+                
+                # Calculate 3D Ring Volume for each cell in this column: V = 2 * pi * R * dR * dz
+                r_left = r_edges[i] * AU_to_cm
+                r_right = r_edges[i+1] * AU_to_cm
+                dR = r_right - r_left
+                R_center = float(r_value) * AU_to_cm
+                
+                cell_volumes = 2 * np.pi * R_center * dR * (dz * AU_to_cm) # Volume in cm^3
+                
+                # Filter active gas species
+                local_species_list = keep_gas_species_only(list(abundance_array.coords['species'].values))
+                
+                # Target coefficients
+                target_coeffs = np.array([atom_cache.setdefault(sp, count_target_atom(sp, target_atom)) for sp in local_species_list])
+                
+                # --- PHYSICAL MULTIPLICATION WITH BROADCASTING ---
+                # Extract relative abundances y (shape: species x altitudes, e.g., 510 x 14)
+                y_abundances = abundance_array.isel(time=itime).sel(species=local_species_list).values
+                
+                # Reshape nH_profile and cell_volumes to (1, altitudes) to perfectly broadcast over species
+                nH_2d = nH_profile[np.newaxis, :]     
+                volumes_2d = cell_volumes[np.newaxis, :] 
+                
+                # True physical number of target atoms per cell per species
+                # Shape matches y_abundances perfectly: (510, 14)
+                physical_atoms = y_abundances * nH_2d * volumes_2d
+                
+                # Total atoms per species across the whole vertical column (sum over altitudes -> axis=1)
+                # target_coeffs has shape (510,)
+                total_column_atoms = np.sum(physical_atoms, axis=1)
+                contributions_per_species = total_column_atoms * target_coeffs
+                # -----------------------------------------------------------------
+                
+                # Accumulate globally
+                for idx, species in enumerate(local_species_list):
+                    if contributions_per_species[idx] > 0:
+                        global_species_contributions[species] = global_species_contributions.get(species, 0.0) + contributions_per_species[idx]
+                        
+            except Exception as e:
+                if verbose: print(f"Error processing data for R={r_value}: {e}")
+        elif verbose: 
+            print(f"File not found: {file_path}")
+
+    # --- 3. STATISTICAL PROCESSING & PLOTTING ---
+    total_atoms_sum = sum(global_species_contributions.values())
+    if total_atoms_sum == 0:
+        print(f"No {target_atom} atoms detected within the current physical structure.")
+        return
+
+    species_percentages = {sp: (val / total_atoms_sum) * 100 for sp, val in global_species_contributions.items()}
+    sorted_species = sorted(species_percentages.items(), key=lambda x: x[1], reverse=True)
+    
+    top = sorted_species[:spnumber]
+    others_sum = 100.0 - sum(val for sp, val in top)
+
+    labels = [item[0] for item in top]
+    percentages = [item[1] for item in top]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.bar(labels, percentages, color=color, edgecolor='grey', alpha=0.85)
+    
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(f'{height:.4f}%',
+                    xy=(bar.get_x() + bar.get_width() / 2, height),
+                    xytext=(0, 4),
+                    textcoords="offset points",
+                    ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    ax.set_ylabel('Global Physical Budget Contribution (%)', fontsize=12)
+    ax.set_xlabel(f'Chemical Species (Top {spnumber})', fontsize=12)
+    
+    try:
+        first_r = radii[0]
+        time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
+        ax.set_title(f'Top {spnumber} Physical Molecular Reservoirs for Element [{target_atom}]\n$t = {time_seconds/3.156e7:.2e}$ years (Gas phase)', fontsize=14, pad=15)
+    except:
+        ax.set_title(f'Top {spnumber} Physical Molecular Reservoirs for Element [{target_atom}]', fontsize=14, pad=15)
+        
+    ax.set_ylim(0, max(percentages) * 1.15 if percentages else 100)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+
+    if others_sum > 0.0001:
+        plt.figtext(0.15, -0.01, f"* Omitted minor species account for {others_sum:.4f}% of the total physical {target_atom} budget.", 
+                    fontsize=10, style='italic')
+
+    plt.tight_layout()
+    plt.show()

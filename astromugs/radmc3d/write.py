@@ -234,6 +234,27 @@ def numberdens_mol(numberdens, species='CO', gridstyle="regular", thermpath='the
                     f.write("{0:e}\n".format(numberdens[ix,iy]))
     f.close()
 
+def gas_temperature(temp, thermpath='thermal/'):
+    """Write ``gas_temperature.inp`` for RADMC-3D line radiative transfer.
+
+    Parameters
+    ----------
+    temp : ndarray, shape (nr, nt)
+        Gas temperature in K on the spherical grid, indexed ``[ir, itheta]``.
+    thermpath : str, optional
+        Output directory. Default is ``'thermal/'``.
+    """
+    nr, nt = temp.shape
+    ncells  = nr * nt
+    print(f'writing gas_temperature.inp  ({ncells} cells)...')
+    with open(thermpath + 'gas_temperature.inp', 'w') as f:
+        f.write("1\n")
+        f.write(f"{ncells}\n")
+        for iy in range(nt):
+            for ix in range(nr):
+                f.write(f"{temp[ix, iy]:.6e}\n")
+
+
 def lines(species='CO', format='leiden', thermpath='thermal/'):
     '''
     Desc: write lines.inp

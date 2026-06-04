@@ -15,6 +15,11 @@ import os
 import numpy as np
 import pandas as pd
 
+
+import re
+from matplotlib.collections import PolyCollection
+
+
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
@@ -1200,3 +1205,733 @@ def nmgc_grainsizes(chempath='chemistry/', quantity='Td', vmin=None, vmax=None, 
         fig.savefig(savename, bbox_inches='tight')
 
     plt.show()
+
+
+
+def plot_outputs_nautilus(chempath,
+                          main_output_dict,
+                          itime=-1,
+                          MODE='chemistry',
+                          KEY_NAME='CO',
+                          VARIABLE_LABEL="Fractional Abundance of CO [$n_{X}/n_{H}$]",
+                          fracab=True,
+                          verbose=True,
+                          xlim=None,
+                          ylim=None,
+                          colormap="gnuplot",
+                          vmin=None,
+                          vmax=None):
+    """
+    Plots a 2D vertical cross-section (poloidal cut) of Nautilus simulation outputs.
+
+    This function builds a non-uniform structured grid using discrete column blocks 
+    derived from physical simulation folders. It can plot either standard physical 
+    properties (like gas temperature) or chemical species abundances processed 
+    via xarray.
+
+    Args:
+        chempath (str): Path to the parent directory containing the "nnAU" folders.
+        main_output_dict (dict): Master dictionary storing the simulation outputs,
+            where keys are radii (int/float) and values are sub-dictionaries (e.g. pipeline.chemistry)
+        itime (int, optional): Index of the simulation timestep to visualize. 
+            Defaults to -1 (the final timestep).
+        MODE (str, optional): Type of variable to plot. Options are 'chemistry' 
+            or 'physical'. Defaults to 'chemistry'.
+        KEY_NAME (str, optional): Dict key name for a 'physical' variable, or the 
+            chemical species formula string for 'chemistry' mode. Defaults to 'CO'.
+        VARIABLE_LABEL (str, optional): Label displayed alongside the colorbar. 
+            Defaults to "Fractional Abundance of CO [$n_{X}/n_{H}$]".
+        fracab (bool, optional): If True, plots raw fractional abundances. If False, 
+            multiplies abundances by the total hydrogen number density (nH) to 
+            show absolute number densities. Defaults to True.
+        verbose (bool, optional): If True, prints diagnostic mismatch or file missing 
+            warnings to the console. Defaults to True.
+        xlim (tuple of float, optional): Custom (min, max) boundaries for the horizontal 
+            Radius axis. Defaults to None (automatically bound to grid).
+        ylim (tuple of float, optional): Custom (min, max) boundaries for the vertical 
+            Altitude axis. Defaults to None (automatically bound to grid).
+        colormap (str, optional): Matplotlib colormap string used to style the discrete 
+            mesh and colorbar scale. Defaults to "gnuplot".
+        vmin (float, optional): Forced lower bound for the colorbar scale. 
+            Defaults to None (computed automatically).
+        vmax (float, optional): Forced upper bound for the colorbar scale. 
+            Defaults to None (computed automatically).
+
+    Returns:
+        None: Displays a Matplotlib pyplot figure window.
+    """
+    
+    # --- EXTRACT DATA BY COLUMN (RADIUS) ---
+    columns_data = []
+    folder_pattern = re.compile(r"^([0-9.]+)\s*AU$", re.IGNORECASE)
+
+    # Loop directly over your dictionary keys (5, 10, 15, etc.)
+    for r_value in main_output_dict.keys():
+        # Construct the exact folder name matching your format (e.g., "5AU", "10AU")
+        folder_name = f"{r_value}AU"
+        
+        # Building the path using your 'chempath' parameter
+        file_path = os.path.join(chempath, folder_name, "1D_static.dat")
+        
+        if os.path.exists(file_path):
+            try:
+                # 1. Load the z-coordinates for this radius column
+                z_points = np.loadtxt(file_path,comments='!', usecols=0)
+                sub_dict = main_output_dict[r_value]
+                
+                # 2. Extract the 1D physical slice based on your chosen mode
+                if MODE == 'physical':
+                    full_array = sub_dict[KEY_NAME]
+                    v_points = full_array[itime, :].copy() # Use .copy() to preserve the original array
+                elif MODE == 'chemistry':
+                    abundance_array = sub_dict['abundances']
+                    v_points = abundance_array.isel(time=itime).sel(species=KEY_NAME).values.copy()
+                    
+                    if not fracab:
+                        nH = sub_dict["H_number_density"][itime, :]
+                        v_points = v_points * nH  
+                
+                # Store valid columns if lengths match perfectly
+                if len(z_points) == len(v_points):
+                    columns_data.append({
+                        'R': float(r_value),  # Float ensures proper mathematical spacing on the grid
+                        'z': np.array(z_points),
+                        'v': np.array(v_points)
+                    })
+                else:
+                    if verbose: 
+                        print(f"Size mismatch for R={r_value}: file has {len(z_points)} points, dict has {len(v_points)}.")
+                        
+            except Exception as e:
+                if verbose: 
+                    print(f"Error processing data for R={r_value}: {e}")
+        else:
+            if verbose: 
+                print(f"File not found: {file_path}")
+    
+    # Sort columns by radius for accurate boundary rendering
+    columns_data = sorted(columns_data, key=lambda x: x['R'])
+    
+    # --- GENERATE THE POLYGON MESH ---
+    polygons = []
+    values = []
+    
+    radii = [col['R'] for col in columns_data]
+    r_edges = []
+    if len(radii) > 1:
+        r_midshifts = 0.5 * np.diff(radii)
+        r_edges.append(radii[0] - r_midshifts[0])
+        for i in range(len(r_midshifts)):
+            r_edges.append(radii[i] + r_midshifts[i])
+        r_edges.append(radii[-1] + r_midshifts[-1])
+    elif len(radii) == 1:
+        r_edges = [radii[0] - 0.5, radii[0] + 0.5]
+    
+    for i, col in enumerate(columns_data):
+        r_left = r_edges[i]
+        r_right = r_edges[i+1]
+        
+        z_pts = col['z']
+        v_pts = col['v']
+        
+        z_edges = []
+        z_midshifts = 0.5 * np.diff(z_pts)
+        z_edges.append(z_pts[0] - z_midshifts[0]) 
+        for j in range(len(z_midshifts)):
+            z_edges.append(z_pts[j] + z_midshifts[j])
+        z_edges.append(max(0.0, z_pts[-1] + z_midshifts[-1])) 
+    
+        for j in range(len(v_pts)):
+            z_top = z_edges[j]
+            z_bottom = z_edges[j+1]
+            
+            poly = [
+                (r_left, z_top),
+                (r_right, z_top),
+                (r_right, z_bottom),
+                (r_left, z_bottom)
+            ]
+            polygons.append(poly)
+            values.append(v_pts[j])
+    
+    # --- PLOTTING THE DISCRETE PROFILE ---
+    if not polygons:
+        if verbose: 
+            print("No polygons generated. Check your configuration parameters.")
+    else:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        values = np.array(values)
+        
+        # Détermination des bornes vmin et vmax de l'échelle
+        actual_vmin = vmin if vmin is not None else (max(1e-15, values[values > 0].min() if any(values > 0) else 1e-15) if (MODE == 'chemistry' or "density" in KEY_NAME.lower()) else values.min())
+        actual_vmax = vmax if vmax is not None else values.max()
+
+        # Logarithmic scale configurations for density/chemistry maps
+        if MODE == 'chemistry' or "density" or "extinction" in KEY_NAME.lower():
+            color_norm = plt.cm.colors.LogNorm(vmin=actual_vmin, vmax=actual_vmax)
+        else:
+            color_norm = plt.cm.colors.Normalize(vmin=actual_vmin, vmax=actual_vmax)
+    
+        # FIXED: Changed hardcoded 'inferno' to your 'colormap' parameter so the plot matches the colorbar
+        coll = PolyCollection(polygons, array=values, cmap=colormap, norm=color_norm, edgecolors='none')
+        ax.add_collection(coll)
+    
+        # Setup matching colorbar scale
+        sm = plt.cm.ScalarMappable(cmap=colormap, norm=color_norm)
+        sm.set_array(values)
+        fig.colorbar(sm, ax=ax, label=VARIABLE_LABEL)
+    
+        ax.set_xlabel('Radius R [AU]')
+        ax.set_ylabel('Altitude z [AU]')
+        
+        try:
+            first_r = radii[0]
+            time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
+            ax.set_title(f'$t = {time_seconds/3.156e7:.2e}$ years ({KEY_NAME})')
+        except:
+            ax.set_title(f'{KEY_NAME}')
+    
+        all_z = np.concatenate([col['z'] for col in columns_data])
+        ax.set_xlim(xlim if xlim is not None else (0, max(radii) * 1.02))
+        ax.set_ylim(ylim if ylim is not None else (0, max(all_z) * 1.07))
+        
+        plt.show()
+
+
+def plot_midplane_nautilus(main_output_dict,
+                           itime=-1,
+                           MODE='chemistry',
+                           KEY_NAME='CO',
+                           VARIABLE_LABEL="Fractional Abundance of CO [$n_{X}/n_{H}$]",
+                           fracab=True,
+                           verbose=True,
+                           xlim=None,
+                           ylim=None,
+                           color="crimson",
+                           vmin=None,
+                           vmax=None):
+    """
+    Plots a 1D radial profile of a variable strictly at the disk midplane (z = 0).
+
+    Args:
+        main_output_dict (dict): Master dictionary storing the simulation outputs,
+            where keys are radii (int/float) and values are sub-dictionaries.
+        itime (int, optional): Index of the simulation timestep to visualize. 
+            Defaults to -1 (the final timestep).
+        MODE (str, optional): Type of variable to plot. Options are 'chemistry' 
+            or 'physical'. Defaults to 'chemistry'.
+        KEY_NAME (str, optional): Dict key name for a 'physical' variable, or the 
+            chemical species formula string for 'chemistry' mode. Defaults to 'CO'.
+        VARIABLE_LABEL (str, optional): Label displayed along the vertical axis. 
+            Defaults to "Fractional Abundance of CO [$n_{X}/n_{H}$]".
+        fracab (bool, optional): If True, plots raw fractional abundances. If False, 
+            multiplies abundances by the total hydrogen number density (nH). Defaults to True.
+        verbose (bool, optional): If True, prints diagnostic processing errors. Defaults to True.
+        xlim (tuple of float, optional): Custom (min, max) boundaries for the Radius axis.
+        ylim (tuple of float, optional): Custom (min, max) boundaries for the vertical axis.
+        color (str, optional): Line/marker color for the plot. Defaults to "crimson".
+        vmin (float, optional): Forced lower bound for the vertical scale.
+        vmax (float, optional): Forced upper bound for the vertical scale.
+
+    Returns:
+        None: Displays a Matplotlib pyplot 1D line figure.
+    """
+    radii_list = []
+    values_list = []
+
+    # Loop directly over your dictionary keys (5, 10, 15, etc.)
+    for r_value in main_output_dict.keys():
+        try:
+            sub_dict = main_output_dict[r_value]
+            
+            # CRITICAL: In Nautilus 1D grid arrays, index -1 represents the midplane (z = 0)
+            MIDPLANE_INDEX = -1 
+            
+            # Extract the single value at the midplane
+            if MODE == 'physical':
+                full_array = sub_dict[KEY_NAME]
+                v_midplane = full_array[itime, MIDPLANE_INDEX]
+            elif MODE == 'chemistry':
+                abundance_array = sub_dict['abundances']
+                v_midplane = float(abundance_array.isel(time=itime).sel(species=KEY_NAME).values[MIDPLANE_INDEX])
+                
+                if not fracab:
+                    nH_midplane = sub_dict["H_number_density"][itime, MIDPLANE_INDEX]
+                    v_midplane = v_midplane * nH_midplane
+            
+            radii_list.append(float(r_value))
+            values_list.append(v_midplane)
+            
+        except Exception as e:
+            if verbose:
+                print(f"Error processing midplane data for R={r_value}: {e}")
+
+    if not radii_list:
+        if verbose:
+            print("No data collected for the midplane plot. Check your keys.")
+        return
+
+    # Sort arrays by radius to ensure the plotted line connects points sequentially
+    sort_indices = np.argsort(radii_list)
+    radii_arr = np.array(radii_list)[sort_indices]
+    values_arr = np.array(values_list)[sort_indices]
+
+    # --- PLOTTING ---
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    # Determine whether to use a logarithmic vertical axis
+    if MODE == 'chemistry' or "density" in KEY_NAME.lower() or "extinction" in KEY_NAME.lower():
+        ax.set_yscale('log')
+        # Fallback value checking to prevent log(0) crash loops
+        actual_vmin = vmin if vmin is not None else max(1e-15, values_arr[values_arr > 0].min() if any(values_arr > 0) else 1e-15)
+        actual_vmax = vmax if vmax is not None else values_arr.max()
+        ax.set_ylim(actual_vmin, actual_vmax)
+    else:
+        if vmin is not None or vmax is not None:
+            ax.set_ylim(vmin, vmax)
+
+    # Plot both a line and marker dots so sparse radii points are clearly visible
+    ax.plot(radii_arr, values_arr, color=color, linestyle='-', marker='o', markersize=6, linewidth=1.5)
+
+    # Labels and Titles
+    ax.set_xlabel('Radius R [AU]')
+    ax.set_ylabel(VARIABLE_LABEL)
+    
+    try:
+        time_seconds = main_output_dict[radii_list[0]]['abundances'].coords['time'].values[itime]
+        ax.set_title(f'Midplane ($z = 0$) Profile at $t = {time_seconds/3.156e7:.2e}$ years')
+    except:
+        ax.set_title(f'Midplane ($z = 0$) Profile - {KEY_NAME}')
+
+    # Apply manual axis overrides if supplied
+    if xlim is not None: ax.set_xlim(xlim)
+    if ylim is not None: ax.set_ylim(ylim)
+
+    ax.grid(True, linestyle=':', alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+
+
+def plot_grain_surface_midplane(chempath,
+                                main_output_dict,
+                                itime=-1,
+                                verbose=True,
+                                xlim=None,
+                                ylim=None,
+                                color="darkgreen"):
+    """
+    Plots the total available grain surface area (sum over all bins of: 4*pi*a^2 * n_grain)
+    strictly at the disk midplane (z = 0) as a function of Radius.
+    """
+    radii_list = []
+    surface_list = []
+
+    # Loop over the radius keys (5, 10, 15, etc.)
+    for r_value in main_output_dict.keys():
+        folder_name = f"{r_value}AU"
+        file_path = os.path.join(chempath, folder_name, "1D_grain_sizes.in")
+        
+        if os.path.exists(file_path):
+            try:
+                # 1. Load the data from 1D_grain_sizes.in (ignoring comments starting with '!')
+                # Every line is a spatial point from atmosphere down to midplane
+                grain_data = np.loadtxt(file_path, comments='!')
+                
+                # Extract only the midplane layer (the last row, index -1)
+                midplane_row = grain_data[-1, :]
+                
+                # 2. Determine the number of grain bins (N)
+                total_columns = len(midplane_row)
+                N = int(total_columns / 4)
+                
+                # 3. Extract group 1 (grain radii 'a') and group 2 ('GTODN' values)
+                a_array = midplane_row[0:N]          # First N columns [cm]
+                gtodn_array = midplane_row[N:2*N]    # Next N columns [dimensionless]
+                
+                # 4. Get the Hydrogen number density (nH) at the midplane from main_output_dict
+                sub_dict = main_output_dict[r_value]
+                nH_midplane = sub_dict["H_number_density"][itime, -1]
+                
+                # 5. Compute the physical formula: Sum over all bins of (4 * pi * a^2 * nH / GTODN)
+                # We use numpy vectorized operations for the sum
+                total_surface = 4 * np.pi * nH_midplane * np.sum((a_array**2) / gtodn_array)
+                
+                radii_list.append(float(r_value))
+                surface_list.append(total_surface)
+                
+            except Exception as e:
+                if verbose:
+                    print(f"Error processing grain data for R={r_value}: {e}")
+        else:
+            if verbose:
+                print(f"File not found: {file_path}")
+
+    if not radii_list:
+        if verbose:
+            print("No data collected. Check paths or files.")
+        return
+
+    # Sort arrays by radius for a clean line plot
+    sort_indices = np.argsort(radii_list)
+    radii_arr = np.array(radii_list)[sort_indices]
+    surface_arr = np.array(surface_list)[sort_indices]
+
+    # --- PLOTTING ---
+    fig, ax = plt.subplots(figsize=(9, 5))
+    
+    # Grain surfaces usually vary over orders of magnitude, a log scale is ideal
+    ax.set_yscale('log')
+    
+    # Plot line + points
+    ax.plot(radii_arr, surface_arr, color=color, linestyle='-', marker='s', markersize=5, linewidth=1.5)
+
+    # Labels and formatting
+    ax.set_xlabel('Radius R [AU]')
+    ax.set_ylabel(r'Total Grain Surface Area $\sim\text{cm}^{2}/\text{cm}^{3}$')
+    
+    try:
+        time_seconds = main_output_dict[radii_list[0]]['abundances'].coords['time'].values[itime]
+        ax.set_title(f'Total Grain Surface Area at Midplane ($z=0$) - $t = {time_seconds/3.156e7:.2e}$ yr')
+    except:
+        ax.set_title('Total Grain Surface Area at Midplane ($z=0$)')
+
+    if xlim is not None: ax.set_xlim(xlim)
+    if ylim is not None: ax.set_ylim(ylim)
+    
+    if ylim is None:
+        # Avoid log(0) display errors
+        actual_vmin = max(1e-25, surface_arr[surface_arr > 0].min() if any(surface_arr > 0) else 1e-25)
+        ax.set_ylim(actual_vmin, surface_arr.max() * 2)
+
+    ax.grid(True, linestyle=':', alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+def plot_vertical_cut_nautilus(main_output_dict,
+                              R,
+                              species='CO',
+                              itime=-1,
+                              fracab=True,
+                              col='royalblue',
+                              xlim=None,
+                              ylim=None,
+                              xscale="linear",
+                              yscale="linear"):
+    """
+    Plots the vertical profile (abundance vs. height z) for a given species 
+    at a specific disk radius (R) using NAUTILUS simulation outputs.
+
+    Parameters:
+    -----------
+    main_output_dict : dict
+        Dictionary containing the NAUTILUS simulation outputs (e.g. pipe.chemistry)
+    R : int or float
+        The specific radius (in AU) to extract data for.
+    species : str, optional
+        The chemical species to plot (default is 'CO').
+    itime : int, optional
+        The time index to plot (default is -1, which corresponds to the last timestep).
+    fracab : bool, optional
+        If True, plots fractional abundance relative to H (n_sp/nH). 
+        If False, plots absolute volume density (cm^-3). Default is True.
+    col : str, optional
+        Color of the plot line and markers (default is 'royalblue').
+    xlim, ylim : tuple, optional
+        Limits for the x and y axes (e.g., (min, max)).
+    xscale, yscale : str, optional
+        Scale of the axes (default is "linear").
+    """
+
+    # Check if the requested radius R exists in the provided dictionary keys
+    if R not in list(main_output_dict.keys()):
+        raise ValueError("R does not exist. Please use an existing R that you can find in list(main_output_dict.keys())")
+        
+    # Extract the abundance DataArray for the specified radius R
+    ab = main_output_dict[R]['abundances']    # DataArray shape: (nb_timesteps, nb_species, nz)
+    
+    # Select the data for the chosen timestep (itime) and chemical species
+    sp_last = ab.isel(time=itime).sel(species=species)   
+    sp_arr = sp_last.values                 # Convert to numpy array, shape: (nz,)
+    
+    # Determine whether to plot absolute density or fractional abundance
+    if fracab == False:
+        # Get the hydrogen number density for the last physical condition to convert abundance to density
+        nH     = pipe.chemistry[30]['H_number_density'][-1]   # shape: (nz,)
+        n_sp   = nH * sp_arr
+        xlabel = f'n({species}) [cm$^{{-3}}$]'
+    else :
+        # Use fractional abundance directly
+        n_sp = sp_arr
+        xlabel = f'n({species})/n$_H$'
+
+    # Load the vertical grid (z) from the static 1D structure file for this radius
+    static = pd.read_table(
+        f'{chemistry_path}/{R}AU/1D_static.dat',
+        sep=r'\s+', comment='!', header=None, engine='python'
+    )
+    z = static[0].values   # z coordinate in [AU], ranging from surface to midplane
+    
+    # Retrieve the physical time in seconds for the selected timestep
+    time_seconds = main_output_dict[R]['abundances'].coords['time'].values[itime]
+    
+    # Initialize the matplotlib figure
+    fig = plt.figure(figsize=(7, 5))
+    
+    # Plot the data using both scatter markers and a continuous line
+    plt.scatter(n_sp, z, color=col)
+    plt.plot(n_sp, z, color=col)
+    
+    # Apply labels, grid, title, limits, and scales
+    plt.xlabel(xlabel)
+    plt.ylabel("z [AU]")
+    plt.grid(True, linestyle=':', alpha=0.5)
+    # Convert time from seconds to years in the title display
+    plt.title(f'$R = {R} $ AU - $t = {time_seconds/3.156e7:.2e}$ yr')
+    plt.xlim(xlim)
+    plt.ylim(ylim)
+    plt.xscale(xscale)
+    plt.yscale(yscale)
+    
+    # Adjust layout and display the plot
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_atom_ratio_nautilus(chempath,
+                             main_output_dict,
+                             s1="C",
+                             s2="O",
+                             itime=-1,
+                             verbose=True,
+                             xlim=None,
+                             ylim=None,
+                             colormap="gnuplot",
+                             vmin=None,
+                             vmax=None):
+    """Plots a 2D vertical cross-section of the elemental abundance ratio of two atoms.
+
+    This function builds a non-uniform structured grid (poloidal cut) from discrete 
+    radial column blocks derived from Nautilus physical simulation outputs. It 
+    dynamically parses molecular formulas for all gas-phase species found at each 
+    radius, aggregates the total elemental counts of `s1` and `s2` per grid cell 
+    using an optimized matrix multiplication cache, and renders the calculated 
+    spatial distribution ratio (s1/s2) via a Matplotlib Polygon Collection.
+
+    Args:
+        chempath (str): Path to the parent directory containing the radial simulation 
+            folders (e.g., "5AU", "10AU").
+        main_output_dict (dict): Master simulation dictionary where keys are radii 
+            (int/float) and values are sub-dictionaries containing spatial grid and 
+            chemical data properties (e.g., pipe.chemistry).
+        s1 (str, optional): Chemical symbol of the numerator element. Defaults to "C".
+        s2 (str, optional): Chemical symbol of the denominator element. Defaults to "O".
+        itime (int, optional): Index of the simulation timestep to visualize. 
+            Defaults to -1 (the final simulation timestep).
+        verbose (bool, optional): If True, prints diagnostic mismatched configurations, 
+            missing file warnings, or alerts regarding grid cells containing zero `s2` 
+            atoms to the console. Defaults to True.
+        xlim (tuple of float, optional): Custom (min, max) boundaries for the horizontal 
+            Radius axis. Defaults to None (automatically bound to grid geometry).
+        ylim (tuple of float, optional): Custom (min, max) boundaries for the vertical 
+            Altitude axis. Defaults to None (automatically bound to grid geometry).
+        colormap (str, optional): Matplotlib colormap string used to style the discrete 
+            mesh and colorbar scale. Defaults to "gnuplot".
+        vmin (float, optional): Forced lower bound for the colorbar scale. 
+            Defaults to None (computed automatically from the data minimum).
+        vmax (float, optional): Forced upper bound for the colorbar scale. 
+            Defaults to None (computed automatically from the data maximum).
+
+    Raises:
+        ValueError: If either `s1` or `s2` is not present in the allowed elemental 
+            network base array ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 
+            'Mg', 'Cl', 'P', 'F'].
+
+    Returns:
+        None: Displays a Matplotlib pyplot figure window.
+    """
+
+    
+    elements = ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 'Mg', 'Cl', 'P', 'F']
+    if s1 not in elements or s2 not in elements:
+        raise ValueError("Please check your atoms, one of them is not existing in the model")
+        
+    variable_label = f"Atomic Ratio [{s1}/{s2}]"
+    
+    # --- INTERNAL HELPER ---
+    def count_species_elements(species_name, element1, element2):
+        """Return a dictionary with the counts of element1 and element2 in the given chemical species."""
+        if species_name == 'e-': return {element1: 0, element2: 0}
+        formula = species_name.replace('c-', '').replace('l-', '')
+        if formula.endswith('+') or formula.endswith('-'):
+            formula = formula[:-1]
+        pattern = re.compile(r'([A-Z][a-z]?)(-?\d*)')
+        composition = {}
+        for atom, n in pattern.findall(formula):
+            count = int(n) if n else 1
+            composition[atom] = composition.get(atom, 0) + count
+        return {
+            element1: composition.get(element1, 0),
+            element2: composition.get(element2, 0)}
+
+    def keep_gas_species_only(species):
+        motif = re.compile(r'^[JK]\d{2}|^GRAIN')
+        return [e for e in species if not motif.match(e)]
+
+    # --- GLOBAL CACHE INITIALIZATION ---
+    atom_cache = {}
+
+    # --- EXTRACT DATA BY COLUMN (RADIUS) ---
+    columns_data = []
+
+    for r_value in main_output_dict.keys():
+        folder_name = f"{r_value}AU"
+        file_path = os.path.join(chempath, folder_name, "1D_static.dat")
+        
+        if os.path.exists(file_path):
+            try:
+                z_points = np.loadtxt(file_path, comments='!', usecols=0)
+                sub_dict = main_output_dict[r_value]
+                abundance_array = sub_dict['abundances']
+                
+                local_species_list = keep_gas_species_only(list(abundance_array.coords['species'].values))
+                
+                s1_coeffs = []
+                s2_coeffs = []
+                for species in local_species_list:
+                    if species not in atom_cache:
+                        counts = count_species_elements(species, s1, s2)
+                        atom_cache[species] = (counts[s1], counts[s2])
+                    
+                    c1, c2 = atom_cache[species]
+                    s1_coeffs.append(c1)
+                    s2_coeffs.append(c2)
+                
+                s1_coeffs = np.array(s1_coeffs)[:, np.newaxis]
+                s2_coeffs = np.array(s2_coeffs)[:, np.newaxis]
+                
+                sliced_abundances = abundance_array.isel(time=itime).sel(species=local_species_list).values
+                
+                total_s1 = np.sum(sliced_abundances * s1_coeffs, axis=0)
+                total_s2 = np.sum(sliced_abundances * s2_coeffs, axis=0)
+
+                if verbose:
+                    zero_indices = np.where(total_s2 == 0)[0]
+                    if len(zero_indices) > 0:
+                        # Retrieve the corresponding altitudes to make the message useful
+                        altitudes_zero = z_points[zero_indices]
+                        print(f"[R={r_value} AU] No {s2} atoms detected in {len(zero_indices)} vertical grid cell(s).")
+                        print(f"   -> Affected altitudes [AU]: {altitudes_zero}")
+                
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    v_points = np.where(total_s2 > 0, total_s1 / total_s2, 0.0)
+                
+                if len(z_points) == len(v_points):
+                    columns_data.append({
+                        'R': float(r_value),
+                        'z': np.array(z_points),
+                        'v': np.array(v_points)
+                    })
+                elif verbose: 
+                    print(f"Size mismatch for R={r_value}: file has {len(z_points)} points, ratio has {len(v_points)}.")
+                        
+            except Exception as e:
+                if verbose: 
+                    print(f"Error processing data for R={r_value}: {e}")
+        elif verbose: 
+            print(f"File not found: {file_path}")
+    
+    columns_data = sorted(columns_data, key=lambda x: x['R'])
+    
+    # --- GENERATE THE POLYGON MESH ---
+    polygons = []
+    values = []
+    
+    radii = [col['R'] for col in columns_data]
+    r_edges = []
+    if len(radii) > 1:
+        r_midshifts = 0.5 * np.diff(radii)
+        r_edges.append(radii[0] - r_midshifts[0])
+        for i in range(len(r_midshifts)):
+            r_edges.append(radii[i] + r_midshifts[i])
+        r_edges.append(radii[-1] + r_midshifts[-1])
+    elif len(radii) == 1:
+        r_edges = [radii[0] - 0.5, radii[0] + 0.5]
+    
+    for i, col in enumerate(columns_data):
+        r_left = r_edges[i]
+        r_right = r_edges[i+1]
+        
+        z_pts = col['z']
+        v_pts = col['v']
+        
+        z_edges = []
+        z_midshifts = 0.5 * np.diff(z_pts)
+        z_edges.append(z_pts[0] - z_midshifts[0]) 
+        for j in range(len(z_midshifts)):
+            z_edges.append(z_pts[j] + z_midshifts[j])
+        z_edges.append(max(0.0, z_pts[-1] + z_midshifts[-1])) 
+    
+        for j in range(len(v_pts)):
+            z_top = z_edges[j]
+            z_bottom = z_edges[j+1]
+            
+            poly = [
+                (r_left, z_top),
+                (r_right, z_top),
+                (r_right, z_bottom),
+                (r_left, z_bottom)
+            ]
+            polygons.append(poly)
+            values.append(v_pts[j])
+    
+    # --- PLOTTING ---
+    if not polygons:
+        if verbose: 
+            print("No polygons generated. Check your configuration parameters.")
+    else:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        values = np.array(values)
+        
+        # 1. Determine data bounds (filtering out <= 0 values for logarithmic checks)
+        positive_values = values[values > 0]
+        
+        actual_vmin = vmin if vmin is not None else values.min()
+        actual_vmax = vmax if vmax is not None else values.max()
+
+        # 2. Dynamic normalization selection
+        # Check if positive data exists and if the span exceeds one order of magnitude (factor of 10)
+        if len(positive_values) > 0 and (actual_vmax / positive_values.min()) > 10.0:
+            # Safety check: LogNorm vmin must be strictly greater than 0
+            log_vmin = vmin if vmin is not None else positive_values.min()
+            color_norm = plt.cm.colors.LogNorm(vmin=log_vmin, vmax=actual_vmax)
+            if verbose:
+                print(f"[Plot Scale] Dynamic switch to LOGARITHMIC scale (span > 1 order of magnitude).")
+        else:
+            color_norm = plt.cm.colors.Normalize(vmin=actual_vmin, vmax=actual_vmax)
+            if verbose:
+                print(f"[Plot Scale] Dynamic switch to LINEAR scale (span <= 1 order of magnitude).")
+    
+        # 3. Apply the polygon mesh grid and colorbar
+        coll = PolyCollection(polygons, array=values, cmap=colormap, norm=color_norm, edgecolors='none')
+        ax.add_collection(coll)
+    
+        sm = plt.cm.ScalarMappable(cmap=colormap, norm=color_norm)
+        sm.set_array(values)
+        fig.colorbar(sm, ax=ax, label=variable_label)
+    
+        ax.set_xlabel('Radius R [AU]')
+        ax.set_ylabel('Altitude z [AU]')
+        
+        try:
+            first_r = radii[0]
+            time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
+            ax.set_title(f'$t = {time_seconds/3.156e7:.2e}$ years (Ratio {s1}/{s2})')
+        except:
+            ax.set_title(f'Atomic Ratio {s1}/{s2}')
+    
+        all_z = np.concatenate([col['z'] for col in columns_data])
+        ax.set_xlim(xlim if xlim is not None else (0, max(radii) * 1.02))
+        ax.set_ylim(ylim if ylim is not None else (0, max(all_z) * 1.07))
+        
+        plt.show()

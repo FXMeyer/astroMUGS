@@ -505,10 +505,24 @@ class Pipeline:
         line : bool, optional
             Write ``lines.inp`` molecular line data file. Default is False.
         gasvelocity : bool, optional
-            Write ``gas_velocity.inp``. Default is False.
-        gastemp : bool, optional
-            Write gas temperature file (not yet implemented). Default is
-            False.
+            Write ``gas_velocity.inp`` assuming Keplerian rotation. Default
+            is False.
+        gastemp : bool or str, optional
+            Controls gas temperature handling.
+
+            - ``False`` (default): no ``gas_temperature.inp`` is written.
+              Use ``pipe.thermalparams.control.tgas_eq_tdust = 1`` before
+              ``write_line(control=True)`` to let RADMC-3D equate gas and
+              dust temperatures internally.
+            - ``'1D_static'``: read the gas temperature column ``Tg`` from
+              each ``<radius>AU/1D_static.dat`` file in the chemistry
+              directory, remap it to the spherical RADMC-3D grid via
+              bilinear interpolation (the same method as
+              :meth:`convert_nautilus2radmc`), and write
+              ``gas_temperature.inp``. This reproduces the gas temperature
+              that was actually fed into Nautilus and is independent of
+              the chemical timestep.
+
         microturb : bool, optional
             Write microturbulence file (not yet implemented). Default is
             False.
@@ -521,8 +535,6 @@ class Pipeline:
             Stellar mass in solar masses, used for Keplerian velocity
             computation. Default is 1.
         """
-        #os.system("rm thermal/*.inp")
-
         thermpath = self.thermalpath
 
         if not os.path.exists(thermpath):
@@ -534,7 +546,7 @@ class Pipeline:
             radmc3d.write.control(self.thermalparams.control, thermpath=thermpath)
 
         if line==True:
-            print('\nWriting line.inp:')
+            print('\nWriting lines.inp:')
             print('----------------------------')
             radmc3d.write.lines(species=species, format=line_format, thermpath=thermpath)
 
@@ -542,6 +554,50 @@ class Pipeline:
             print('\nWriting gas_velocity.inp:')
             print('----------------------------')
             radmc3d.write.gas_velocity(star_mass=star_mass, r=self.grid.r, theta=self.grid.theta, phi=self.grid.phi, object="disk", thermpath=thermpath)
+
+        if gastemp == '1D_static':
+            print('\nWriting gas_temperature.inp from 1D_static.dat:')
+            print('----------------------------')
+            chempath = self.chempath
+
+            # Discover chemistry radii from folder names
+            au_folders = sorted(
+                [d for d in os.listdir(chempath)
+                 if d.endswith('AU') and os.path.isdir(os.path.join(chempath, d))],
+                key=lambda x: int(x.replace('AU', ''))
+            )
+            if not au_folders:
+                print('  [write_line] no AU/ folders found in chempath — skipping gas_temperature.inp')
+            else:
+                # Build a chemmodel-style dict for Tg, keyed by radius in AU
+                # Columns in 1D_static.dat: z(0) nH(1) Tg(2) Av(3) ...
+                tg_chemmodel = {}
+                for folder in au_folders:
+                    r_au = int(folder.replace('AU', ''))
+                    static_file = os.path.join(chempath, folder, '1D_static.dat')
+                    if not os.path.isfile(static_file):
+                        print(f'  [write_line] {folder}/1D_static.dat not found — skipping')
+                        continue
+                    data = np.loadtxt(static_file, comments='!')
+                    tg_chemmodel[r_au] = {
+                        'z':  data[:, 0],   # AU, surface → midplane (descending)
+                        'Tg': data[:, 2],   # gas temperature [K]
+                    }
+
+                if not tg_chemmodel:
+                    print('  [write_line] no valid 1D_static.dat files found — skipping')
+                else:
+                    # Read spherical grid (same pattern as convert_nautilus2radmc)
+                    nx, ny, nz, x, y, z = radmc3d.read.grid(thermpath)
+                    self.grid.set_spherical_grid(r_edge=np.array(x)/autocm, theta_edge=y, phi_edge=z)
+                    x, y = self.grid.r, self.grid.theta
+
+                    tg_sph = nautilus.coupling.to_spherical(
+                        tg_chemmodel, nx, ny, x, y, struct='Tg'
+                    )
+                    # Replace zero/negative cells (inner cavity, outer edge) with a floor of 10 K
+                    tg_sph = np.where(tg_sph <= 0, 10.0, tg_sph)
+                    radmc3d.write.gas_temperature(tg_sph, thermpath=thermpath)
 
 
     def write_nautilus(self, sizes=np.array([[0.1]]),

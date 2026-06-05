@@ -1943,107 +1943,146 @@ def plot_top_contributing_species(chempath,
                                   itime=-1,
                                   verbose=True,
                                   spnumber=5,
-                                  color="darkred"):
+                                  color="darkred",
+                                  phase="gas",
+                                  grain_bin=None):
     """
-    Computes the total physical atom budget of a chemical element across a 2D disk 
-    structure and plots the top major molecular reservoirs as a percentage bar chart.
+    Computes and plots the top chemical species contributing to the global, 
+    volume-integrated total budget of a target chemical element within a protoplanetary disk.
 
-    Because Nautilus inputs provide relative fractional abundances:
-    
-        y_i = n_i / n_H
-        
-    where n_H is the total hydrogen number density, this function reconstructs 
-    the spatial grid cell boundaries from discrete radial paths to calculate 
-    the actual 3D ring volumes ($V = 2\pi R \cdot \Delta R \cdot \Delta z$). 
-    It then derives the absolute number of atoms per cell via:
-    
-        N = y_i \cdot n_H \cdot V \cdot \text{atom\_coefficient}
-        
-    Finally, the total quantities are integrated globally over the entire space, 
-    and the highest-contributing gas-phase species are displayed in a clean, 
-    linear bar chart.
-
-    Parameters
-    ----------
+    Parameters:
+    -----------
     chempath : str
-        The path to the parent directory containing the radial simulation 
-        subfolders (e.g., "5AU", "10AU").
+        Path to the directory containing spatial grid subfolders (e.g., '10AU/', '100AU/').
     main_output_dict : dict
-        Master simulation dictionary where keys are radii (int) and values 
-        are sub-dictionaries holding structural grid profiles and chemistry arrays. 
-        Must contain the "H_number_density" profile data.
+        Nested dictionary mapping radial keys to data sub-structures containing 'abundances' 
+        (xarray.DataArray) and 'H_number_density' spatial profiles.
     target_atom : str, default "C"
-        The chemical symbol of the element whose budget is being mapped. 
-        Must be present in the allowed element array.
+        The chemical element symbol whose structural reservoir distribution is evaluated.
     itime : int, default -1
-        The specific timestep index of the simulation to analyze. 
-        Defaults to -1 (the final snapshot).
+        Time index to slice from the multi-epoch data arrays.
     verbose : bool, default True
-        If True, prints diagnostic warnings, missing file notifications, 
-        or processing error exceptions to the terminal.
+        If True, outputs warning and missing file notifications to the console.
     spnumber : int, default 5
-        The total number of top contributing molecular species to display 
-        on the resulting bar chart.
+        Number of top contributing chemical species to display on the bar chart.
     color : str, default "darkred"
-        Any valid Matplotlib color string used to fill the chart bars.
-
-    Raises
-    ------
-    ValueError
-        If `target_atom` is not one of the supported elements found within 
-        the baseline chemical network list.
-
-    Returns
-    -------
-    None
-        Displays a structured linear Matplotlib bar chart window showing 
-        exact percentage values centered on top of each bar.
-
-    Notes
-    -----
-    - Isomer and structural prefixes like 'c-' and 'l-' are automatically 
-      stripped during chemical formula parsing.
-    - Active surface grain species (e.g., starting with 'J', 'K', or 'GRAIN') 
-      are filtered out to focus purely on gas-phase elemental allocations.
-    - Cell volumes assume an axisymetric, midplane-symmetric system 
-      calculated in cylindrical coordinates ($V$ in $\text{cm}^3$).
+        Visual fill color of the generated bar elements.
+    phase : str, default "gas"
+        The chemical phase environment to isolate ("gas", "surface", "mantle", "grain", or "all").
+    grain_bin : int or str, optional
+        Specific grain size category to filter when analyzing surface or mantle ice matrices.
     """
     
     allowed_elements = ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 'Mg', 'Cl', 'P', 'F']
     if target_atom not in allowed_elements:
         raise ValueError(f"Target atom '{target_atom}' is not recognized in the chemical network.")
-        
+    
+    # Updated phase validation list to hold 5 phases
+    valid_phases = ["gas", "surface", "mantle", "grain", "all"]
+    if phase not in valid_phases:
+        raise ValueError(f"Phase '{phase}' unrecognized. Choose among {valid_phases}")
+    if grain_bin is not None and phase in ["gas","all"] : raise ValueError("grain_bin and gas phase can not be defined simultaneously")
+
     # --- INTERNAL HELPERS ---
-    def count_target_atom(species_name, target):
-        if species_name == 'e-': return 0
-        formula = species_name.replace('c-', '').replace('l-', '')
-        if formula.endswith('+') or formula.endswith('-'):
-            formula = formula[:-1]
-        pattern = re.compile(r'([A-Z][a-z]?)(-?\d*)')
+    def parse_species(species_name):
+        if species_name == 'e-':
+            return "gas", None, "e-"
+            
+        grain_match = re.match(r'^([JK])(\d+)(.+)', species_name)
+        
+        if grain_match:
+            p_code, g_bin, raw_formula = grain_match.groups()
+            sp_phase = "surface" if p_code == 'J' else "mantle"
+            sp_bin = g_bin
+        else:
+            sp_phase = "gas"
+            sp_bin = None
+            raw_formula = species_name
+        
+        # Remove structural isomer descriptors while keeping trailing charge states intact
+        clean_formula = raw_formula.replace('c-', '').replace('l-', '')
+        return sp_phase, sp_bin, clean_formula
+
+    def count_target_atom(clean_formula, target):
+        if clean_formula == 'e-': return 0
+        
+        calc_formula = clean_formula
+        if calc_formula.endswith('+') or calc_formula.endswith('-'):
+            calc_formula = calc_formula[:-1]
+            
+        # Strip out any remaining internal dashes to avoid messing up structural regex lookups
+        calc_formula = calc_formula.replace('-', '')
+            
+        pattern = re.compile(r'([A-Z][a-z]?)(\d*)') 
         composition = {}
-        for atom, n in pattern.findall(formula):
-            count = int(n) if n else 1
+        for atom, n in pattern.findall(calc_formula):
+            # Fallback mechanism to safely capture malformed/unconventional formatting rules
+            try:
+                count = int(n) if n else 1
+            except ValueError:
+                count = 1
             composition[atom] = composition.get(atom, 0) + count
         return composition.get(target, 0)
 
-    def keep_gas_species_only(species_list):
-        motif = re.compile(r'^[JK]\d{2}|^GRAIN')
-        return [sp for sp in species_list if not motif.match(sp)]
+    def filter_and_cache_species(species_list):
+        valid_list = []
+        coeffs = []
+        
+        for sp in species_list:
+            if "GRAIN" in sp:
+                continue
+                
+            sp_phase, sp_bin, clean_formula = parse_species(sp)
+            
+            # --- PHASE FILTERING LOGIC ---
+            # "all" passes gas, surface, and mantle environments smoothly
+            if phase == "all":
+                pass
+            # "grain" isolates ice layers (both surface and mantle components)
+            elif phase == "grain":
+                if sp_phase not in ["surface", "mantle"]:
+                    continue
+            # Exact key matching for "gas", "surface", or "mantle"
+            elif sp_phase != phase:
+                continue
+                
+            if grain_bin is not None and sp_phase in ["surface", "mantle"]:
+                if sp_bin != str(grain_bin):
+                    continue
+            
+            coef = count_target_atom(clean_formula, target_atom)
+            if coef > 0:
+                valid_list.append(sp)
+                coeffs.append(coef)
+                
+        return valid_list, np.array(coeffs)
 
-    atom_cache = {}
     global_species_contributions = {}
-    
-    AU_to_cm = 1.496e13  # Conversion factor for volume calculations
+    AU_to_cm = 1.496e13  
 
     # --- 1. RECONSTRUCT RADIAL EDGES FOR VOLUME ---
-    radii = sorted([int(r) for r in main_output_dict.keys()])
+    # Maintains the structural link between the extracted integer and the original dictionary keys
+    radii_map = {}
+    for original_key in main_output_dict.keys():
+        digits = re.findall(r'\d+', str(original_key))
+        if digits:
+            try:
+                rad_int = int(digits[0])
+                radii_map[rad_int] = original_key
+            except ValueError:
+                continue
+                
+    radii = sorted(list(radii_map.keys()))
+    
     if len(radii) == 0:
-        if verbose: print("Main output dictionary is empty.")
+        if verbose: print("Main output dictionary is empty or contains no valid numerical keys.")
         return
         
     if len(radii) > 1:
         r_midshifts = 0.5 * np.diff(radii)
         r_edges = [radii[0] - r_midshifts[0]] + [radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [radii[-1] + r_midshifts[-1]]
+    else:
+        r_edges = [radii[0] * 0.9, radii[0] * 1.1]
 
     # --- 2. DATA ACCUMULATION WITH PHYSICAL VOLUMES ---
     for i, r_value in enumerate(radii):
@@ -2052,57 +2091,51 @@ def plot_top_contributing_species(chempath,
         
         if os.path.exists(file_path):
             try:
-                # Load altitude profile
                 z_points = np.loadtxt(file_path, comments='!', usecols=0)
                 
-                sub_dict = main_output_dict[r_value]
-                abundance_array = sub_dict['abundances']
+                # Retrieve the exact original key mapping (e.g. string vs int representations)
+                orig_key = radii_map[r_value]
+                sub_dict = main_output_dict[orig_key]
                 
-                # Fetch nH density profile (assuming 'density' or 'nH' is stored in your sub_dict)
+                abundance_array = sub_dict['abundances']
                 nH_profile = sub_dict["H_number_density"][itime,:]
                 
-                # Reconstruct vertical cell edges (dz)
                 if len(z_points) > 1:
                     z_midshifts = 0.5 * np.diff(z_points)
                     z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
                     dz = np.abs(np.diff(z_edges))
+                else:
+                    dz = np.array([z_points[0] if z_points[0] > 0 else 1.0])
                 
-                # Calculate 3D Ring Volume for each cell in this column: V = 2 * pi * R * dR * dz
                 r_left = r_edges[i] * AU_to_cm
                 r_right = r_edges[i+1] * AU_to_cm
                 dR = r_right - r_left
                 R_center = float(r_value) * AU_to_cm
                 
-                cell_volumes = 2 * np.pi * R_center * dR * (dz * AU_to_cm) # Volume in cm^3
+                # Evaluate cylindrical domain shell spatial volume elements: 2 * pi * R * dR * dZ
+                cell_volumes = 2 * np.pi * R_center * dR * (dz * AU_to_cm) 
                 
-                # Filter active gas species
-                local_species_list = keep_gas_species_only(list(abundance_array.coords['species'].values))
+                raw_species = list(abundance_array.coords['species'].values)
+                local_species_list, target_coeffs = filter_and_cache_species(raw_species)
                 
-                # Target coefficients
-                target_coeffs = np.array([atom_cache.setdefault(sp, count_target_atom(sp, target_atom)) for sp in local_species_list])
+                if not local_species_list:
+                    continue 
                 
-                # --- PHYSICAL MULTIPLICATION WITH BROADCASTING ---
-                # Extract relative abundances y (shape: species x altitudes, e.g., 510 x 14)
                 y_abundances = abundance_array.isel(time=itime).sel(species=local_species_list).values
                 
-                # Reshape nH_profile and cell_volumes to (1, altitudes) to perfectly broadcast over species
                 nH_2d = nH_profile[np.newaxis, :]     
                 volumes_2d = cell_volumes[np.newaxis, :] 
                 
-                # True physical number of target atoms per cell per species
-                # Shape matches y_abundances perfectly: (510, 14)
+                # Scale relative molecular fractional abundance values into raw physical particle pools
                 physical_atoms = y_abundances * nH_2d * volumes_2d
-                
-                # Total atoms per species across the whole vertical column (sum over altitudes -> axis=1)
-                # target_coeffs has shape (510,)
+                total_column_atoms = np.sum(physical_atoms, axis=1)
                 total_column_atoms = np.sum(physical_atoms, axis=1)
                 contributions_per_species = total_column_atoms * target_coeffs
-                # -----------------------------------------------------------------
                 
-                # Accumulate globally
                 for idx, species in enumerate(local_species_list):
                     if contributions_per_species[idx] > 0:
-                        global_species_contributions[species] = global_species_contributions.get(species, 0.0) + contributions_per_species[idx]
+                        _, _, clean_formula = parse_species(species)
+                        global_species_contributions[clean_formula] = global_species_contributions.get(clean_formula, 0.0) + contributions_per_species[idx]
                         
             except Exception as e:
                 if verbose: print(f"Error processing data for R={r_value}: {e}")
@@ -2112,7 +2145,8 @@ def plot_top_contributing_species(chempath,
     # --- 3. STATISTICAL PROCESSING & PLOTTING ---
     total_atoms_sum = sum(global_species_contributions.values())
     if total_atoms_sum == 0:
-        print(f"No {target_atom} atoms detected within the current physical structure.")
+        bin_str = f" (Bin: {grain_bin})" if grain_bin else ""
+        print(f"No {target_atom} atoms detected within the chosen criteria [Phase: {phase}{bin_str}].")
         return
 
     species_percentages = {sp: (val / total_atoms_sum) * 100 for sp, val in global_species_contributions.items()}
@@ -2135,22 +2169,806 @@ def plot_top_contributing_species(chempath,
                     textcoords="offset points",
                     ha='center', va='bottom', fontsize=10, fontweight='bold')
 
-    ax.set_ylabel('Global Physical Budget Contribution (%)', fontsize=12)
+    # Handle conditional subtitle parsing across the 5 dynamic phases
+    is_ice_phase = phase in ["surface", "mantle", "grain"]
+    bin_title = f" (Bin {grain_bin})" if (grain_bin and is_ice_phase) else (" (All Grains)" if is_ice_phase else "")
+    phase_title = f"Phase: {phase.upper()}{bin_title}"
+
+    ax.set_ylabel(f'Global {phase_title} Budget Contribution (%)', fontsize=11)
     ax.set_xlabel(f'Chemical Species (Top {spnumber})', fontsize=12)
     
     try:
         first_r = radii[0]
-        time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
-        ax.set_title(f'Top {spnumber} Physical Molecular Reservoirs for Element [{target_atom}]\n$t = {time_seconds/3.156e7:.2e}$ years (Gas phase)', fontsize=14, pad=15)
+        time_seconds = main_output_dict[radii_map[first_r]]['abundances'].coords['time'].values[itime]
+        ax.set_title(f'Top {spnumber} Reservoirs for Element [{target_atom}] — {phase_title}\n$t = {time_seconds/3.156e7:.2e}$ years (Volume Integrated)', fontsize=13, pad=15)
     except:
-        ax.set_title(f'Top {spnumber} Physical Molecular Reservoirs for Element [{target_atom}]', fontsize=14, pad=15)
+        ax.set_title(f'Top {spnumber} Reservoirs for Element [{target_atom}] — {phase_title}', fontsize=13, pad=15)
         
     ax.set_ylim(0, max(percentages) * 1.15 if percentages else 100)
     ax.grid(axis='y', linestyle='--', alpha=0.4)
 
     if others_sum > 0.0001:
-        plt.figtext(0.15, -0.01, f"* Omitted minor species account for {others_sum:.4f}% of the total physical {target_atom} budget.", 
+        plt.figtext(0.15, -0.01, f"* Omitted minor species account for {others_sum:.4f}% of the filtered physical {target_atom} budget.", 
                     fontsize=10, style='italic')
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_top_species_per_radius(chempath,
+                                main_output_dict,
+                                target_atom="C",
+                                itime=-1,
+                                verbose=True,
+                                spnumber=5,
+                                phase="gas",
+                                grain_bin=None,
+                                cmap_name="tab10",
+                                rmin=None,
+                                rmax=None):
+    """
+    Computes and plots the top N contributing chemical species for a target element
+    as a function of disk radius within an optional [rmin, rmax] radial range. 
+    Displays a horizontal bar chart grouped by radius on the Y-axis, with local budget 
+    percentages on the X-axis. Each unique chemical species is mapped to a distinct 
+    color from the chosen colormap.
+
+    Parameters:
+    -----------
+    chempath : str
+        Path to the directory containing spatial grid subfolders (e.g., '10AU/', '100AU/').
+    main_output_dict : dict
+        Nested dictionary mapping radial keys to data sub-structures containing 'abundances' 
+        and 'H_number_density' spatial profiles.
+    target_atom : str, default "C"
+        The chemical element symbol whose structural reservoir distribution is evaluated.
+    itime : int, default -1
+        Time index to slice from the multi-epoch data arrays.
+    verbose : bool, default True
+        If True, outputs warning and missing file notifications to the console.
+    spnumber : int, default 5
+        Number of top contributing chemical species to display for each radius.
+    phase : str, default "gas"
+        The chemical phase environment to isolate ("gas", "surface", "mantle", "grain", or "all").
+    grain_bin : int or str, optional
+        Specific grain size category to filter when analyzing surface or mantle ice matrices.
+    cmap_name : str, default "tab10"
+        Name of the Matplotlib colormap used to dynamically assign unique colors to species.
+    rmin : float or int, optional
+        Minimum inclusive radius boundary (in AU) to process. If None, defaults to the disk innermost grid point.
+    rmax : float or int, optional
+        Maximum inclusive radius boundary (in AU) to process. If None, defaults to the disk outermost grid point.
+    """
+    
+    # Allowed elements check
+    allowed_elements = ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 'Mg', 'Cl', 'P', 'F']
+    if target_atom not in allowed_elements:
+        raise ValueError(f"Target atom '{target_atom}' is not recognized in the chemical network.")
+    
+    # Phase validation
+    valid_phases = ["gas", "surface", "mantle", "grain", "all"]
+    if phase not in valid_phases:
+        raise ValueError(f"Phase '{phase}' unrecognized. Choose among {valid_phases}")
+    if grain_bin is not None and phase in ["gas","all"] : raise ValueError("grain_bin and gas phase can not be defined simultaneously")
+
+    # --- INTERNAL HELPERS ---
+    def parse_species(species_name):
+        if species_name == 'e-':
+            return "gas", None, "e-"
+            
+        grain_match = re.match(r'^([JK])(\d+)(.+)', species_name)
+        
+        if grain_match:
+            p_code, g_bin, raw_formula = grain_match.groups()
+            sp_phase = "surface" if p_code == 'J' else "mantle"
+            sp_bin = g_bin
+        else:
+            sp_phase = "gas"
+            sp_bin = None
+            raw_formula = species_name
+        
+        clean_formula = raw_formula.replace('c-', '').replace('l-', '')
+        return sp_phase, sp_bin, clean_formula
+
+    def count_target_atom(clean_formula, target):
+        if clean_formula == 'e-': return 0
+        
+        calc_formula = clean_formula
+        if calc_formula.endswith('+') or calc_formula.endswith('-'):
+            calc_formula = calc_formula[:-1]
+            
+        calc_formula = calc_formula.replace('-', '')
+            
+        pattern = re.compile(r'([A-Z][a-z]?)(\d*)') 
+        composition = {}
+        for atom, n in pattern.findall(calc_formula):
+            try:
+                count = int(n) if n else 1
+            except ValueError:
+                count = 1
+            composition[atom] = composition.get(atom, 0) + count
+        return composition.get(target, 0)
+
+    def filter_and_cache_species(species_list):
+        valid_list = []
+        coeffs = []
+        for sp in species_list:
+            if "GRAIN" in sp:
+                continue
+            
+            sp_phase, sp_bin, clean_formula = parse_species(sp)
+            
+            # Phase filtering
+            if phase == "all":
+                pass
+            elif phase == "grain":
+                if sp_phase not in ["surface", "mantle"]:
+                    continue
+            elif sp_phase != phase:
+                continue
+                
+            # Size bin filtering
+            if grain_bin is not None and sp_phase in ["surface", "mantle"]:
+                if sp_bin != str(grain_bin):
+                    continue
+                    
+            coef = count_target_atom(clean_formula, target_atom)
+            if coef > 0:
+                valid_list.append(sp)
+                coeffs.append(coef)
+        return valid_list, np.array(coeffs)
+
+    AU_to_cm = 1.496e13  
+
+    # --- 1. RECONSTRUCT RADIAL EDGES FOR VOLUME ---
+    radii_map = {}
+    for original_key in main_output_dict.keys():
+        digits = re.findall(r'\d+', str(original_key))
+        if digits:
+            try:
+                rad_int = int(digits[0])
+                radii_map[rad_int] = original_key
+            except ValueError:
+                continue
+                
+    extracted_radii = sorted(list(radii_map.keys()))
+    
+    # --- RADIAL LIMITS FILTERING ---
+    radii = []
+    for r in extracted_radii:
+        if rmin is not None and r < rmin:
+            continue
+        if rmax is not None and r > rmax:
+            continue
+        radii.append(r)
+    
+    if len(radii) == 0:
+        if verbose: print(f"No grid radii found within the specified boundaries [rmin={rmin}, rmax={rmax}].")
+        return
+        
+    if len(radii) > 1:
+        r_midshifts = 0.5 * np.diff(radii)
+        r_edges = [radii[0] - r_midshifts[0]] + [radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [radii[-1] + r_midshifts[-1]]
+    else:
+        r_edges = [radii[0] * 0.9, radii[0] * 1.1]
+
+    # Structure to hold plot data per radius
+    radial_plot_data = {}
+    all_encountered_species = set()
+
+    # --- 2. DATA ACCUMULATION PER CELL SHELL ---
+    for i, r_value in enumerate(radii):
+        folder_name = f"{r_value}AU"
+        file_path = os.path.join(chempath, folder_name, "1D_static.dat")
+        
+        if os.path.exists(file_path):
+            try:
+                z_points = np.loadtxt(file_path, comments='!', usecols=0)
+                orig_key = radii_map[r_value]
+                sub_dict = main_output_dict[orig_key]
+                
+                abundance_array = sub_dict['abundances']
+                nH_profile = sub_dict["H_number_density"][itime,:]
+                
+                if len(z_points) > 1:
+                    z_midshifts = 0.5 * np.diff(z_points)
+                    z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
+                    dz = np.abs(np.diff(z_edges))
+                else:
+                    dz = np.array([z_points[0] if z_points[0] > 0 else 1.0])
+                
+                r_left = r_edges[i] * AU_to_cm
+                r_right = r_edges[i+1] * AU_to_cm
+                dR = r_right - r_left
+                R_center = float(r_value) * AU_to_cm
+                
+                cell_volumes = 2 * np.pi * R_center * dR * (dz * AU_to_cm) 
+                
+                raw_species = list(abundance_array.coords['species'].values)
+                local_species_list, target_coeffs = filter_and_cache_species(raw_species)
+                
+                if not local_species_list:
+                    continue 
+                
+                y_abundances = abundance_array.isel(time=itime).sel(species=local_species_list).values
+                
+                nH_2d = nH_profile[np.newaxis, :]     
+                volumes_2d = cell_volumes[np.newaxis, :] 
+                
+                physical_atoms = y_abundances * nH_2d * volumes_2d
+                total_column_atoms = np.sum(physical_atoms, axis=1)
+                contributions_per_species = total_column_atoms * target_coeffs
+                
+                local_radius_contributions = {}
+                for idx, species in enumerate(local_species_list):
+                    if contributions_per_species[idx] > 0:
+                        _, _, clean_formula = parse_species(species)
+                        local_radius_contributions[clean_formula] = local_radius_contributions.get(clean_formula, 0.0) + contributions_per_species[idx]
+                
+                radius_total_sum = sum(local_radius_contributions.values())
+                if radius_total_sum > 0:
+                    species_percentages = {sp: (val / radius_total_sum) * 100 for sp, val in local_radius_contributions.items()}
+                    sorted_species = sorted(species_percentages.items(), key=lambda x: x[1], reverse=True)
+                    top_entries = sorted_species[:spnumber]
+                    radial_plot_data[r_value] = top_entries
+                    
+                    for species_name, _ in top_entries:
+                        all_encountered_species.add(species_name)
+                        
+            except Exception as e:
+                if verbose: print(f"Error processing data for R={r_value}: {e}")
+        elif verbose: 
+            print(f"File not found: {file_path}")
+
+    if not radial_plot_data:
+        print(f"No data available to plot for target atom {target_atom} within the specified radius range.")
+        return
+
+    # --- 3. DYNAMIC COLOR ASSIGNMENT VIA COLORMAP ---
+    unique_species_list = sorted(list(all_encountered_species))
+    num_unique_species = len(unique_species_list)
+    
+    try:
+        cmap = plt.get_cmap(cmap_name)
+    except ValueError:
+        if verbose: print(f"Colormap '{cmap_name}' not found. Falling back to default 'tab10'.")
+        cmap = plt.get_cmap("tab10")
+        
+    if hasattr(cmap, 'colors') and len(cmap.colors) >= num_unique_species:
+        species_color_mapping = {sp: cmap(idx) for idx, sp in enumerate(unique_species_list)}
+    else:
+        color_indices = np.linspace(0, 1, num_unique_species) if num_unique_species > 1 else [0.0]
+        species_color_mapping = {sp: cmap(color_indices[idx]) for idx, sp in enumerate(unique_species_list)}
+
+    # --- 4. DYNAMIC GRAPHICAL CONSTRUCTION ---
+    y_labels = []
+    x_percentages = []
+    bar_colors = []
+    
+    reversed_radii = sorted(list(radial_plot_data.keys()), reverse=True)
+    group_edges = []
+    current_index = 0
+
+    for r_val in reversed_radii:
+        top_entries = radial_plot_data[r_val]
+        for species_name, pct_val in reversed(top_entries):
+            y_labels.append(f"{r_val} AU — {species_name}")
+            x_percentages.append(pct_val)
+            bar_colors.append(species_color_mapping[species_name])
+            current_index += 1
+        group_edges.append(current_index)
+
+    fig_height = max(4, len(y_labels) * 0.45)
+    fig, ax = plt.subplots(figsize=(11, fig_height))
+    
+    bars = ax.barh(y_labels, x_percentages, color=bar_colors, edgecolor='grey', alpha=0.85, height=0.7)
+    
+    for bar in bars:
+        width = bar.get_width()
+        ax.annotate(f' {width:.2f}%',
+                    xy=(width, bar.get_y() + bar.get_height() / 2),
+                    xytext=(4, 0),
+                    textcoords="offset points",
+                    ha='left', va='center', fontsize=9, fontweight='bold')
+
+    for edge in group_edges[:-1]:
+        ax.axhline(y=edge - 0.5, color='black', linestyle='-', alpha=0.3, linewidth=1.2)
+
+    is_ice_phase = phase in ["surface", "mantle", "grain"]
+    bin_title = f" (Bin {grain_bin})" if (grain_bin and is_ice_phase) else (" (All Grains)" if is_ice_phase else "")
+    phase_title = f"Phase: {phase.upper()}{bin_title}"
+
+    ax.set_xlabel('Local Radial Budget Contribution (%)', fontsize=12)
+    ax.set_ylabel('Disk Radius & Associated Chemical Carrier', fontsize=12)
+    
+    try:
+        first_r = radii[0]
+        time_seconds = main_output_dict[radii_map[first_r]]['abundances'].coords['time'].values[itime]
+        ax.set_title(f'Top {spnumber} Radial Reservoirs for Element [{target_atom}] — {phase_title}\n$t = {time_seconds/3.156e7:.2e}$ years (Locally Normalized per Shell)', fontsize=13, pad=15)
+    except:
+        ax.set_title(f'Top {spnumber} Radial Reservoirs for Element [{target_atom}] — {phase_title}', fontsize=13, pad=15)
+        
+    # Bounds configuration
+    max_pct = max(x_percentages) if x_percentages else 100.0
+    ax.set_xlim(0, min(max_pct * 1.05,100) + 8.0)  
+    ax.set_ylim(-0.6, len(y_labels) - 0.4)
+    
+    ax.grid(axis='x', linestyle='--', alpha=0.4)
+
+    plt.tight_layout()
+    plt.show()
+
+
+import os
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_disk_atomic_composition(chempath,
+                                 main_output_dict,
+                                 itime=-1,
+                                 verbose=True,
+                                 grain_bin=None,
+                                 cmap_name="Set1"):
+    """
+    Computes and plots the total volume-integrated atomic composition of the protoplanetary 
+    disk relative to Hydrogen within each specific phase (X_phase / H_phase). 
+    Elements are sorted by atomic mass on the X-axis (excluding 'X').
+    The Y-axis displays the local abundance ratio in log scale across 5 chemical phases.
+
+    Parameters:
+    -----------
+    chempath : str
+        Path to the directory containing spatial grid subfolders (e.g., '10AU/', '100AU/').
+    main_output_dict : dict
+        Nested dictionary mapping radial keys to data sub-structures containing 'abundances' 
+        and 'H_number_density' spatial profiles.
+    itime : int, default -1
+        Time index to slice from the multi-epoch data arrays.
+    verbose : bool, default True
+        If True, outputs warning and missing file notifications to the console.
+    grain_bin : int or str, optional
+        Specific grain size category to filter when analyzing ice layers. If specified, 
+        gas phase contributions are completely ignored for safety.
+    cmap_name : str, default "Set1"
+        Name of the Matplotlib colormap used to dynamically assign unique colors to the 5 phases.
+    """
+
+    # Dictionary of standard atomic masses used to strictly sort the X-axis
+    atomic_masses = {
+        'H': 1.008, 'He': 4.0026, 'Li': 6.94, 'Be': 9.0122, 'B': 10.81, 'C': 12.011, 
+        'N': 14.007, 'O': 15.999, 'F': 18.998, 'Ne': 20.180, 'Na': 22.990, 'Mg': 24.305, 
+        'Al': 26.982, 'Si': 28.085, 'P': 30.974, 'S': 32.06, 'Cl': 35.45, 'Ar': 39.948, 
+        'K': 39.098, 'Ca': 40.078, 'Fe': 55.845, 'Ni': 58.693
+    }
+
+    # --- INTERNAL HELPERS ---
+    def parse_species(species_name):
+        if species_name == 'e-':
+            return "gas", None, "e-"
+            
+        grain_match = re.match(r'^([JK])(\d+)(.+)', species_name)
+        
+        if grain_match:
+            p_code, g_bin, raw_formula = grain_match.groups()
+            sp_phase = "surface" if p_code == 'J' else "mantle"
+            sp_bin = g_bin
+        else:
+            sp_phase = "gas"
+            sp_bin = None
+            raw_formula = species_name
+        
+        clean_formula = raw_formula.replace('c-', '').replace('l-', '')
+        return sp_phase, sp_bin, clean_formula
+
+    def get_chemical_composition(clean_formula):
+        if clean_formula == 'e-': 
+            return {}
+        
+        calc_formula = clean_formula
+        if calc_formula.endswith('+') or calc_formula.endswith('-'):
+            calc_formula = calc_formula[:-1]
+            
+        calc_formula = calc_formula.replace('-', '')
+            
+        pattern = re.compile(r'([A-Z][a-z]?)(\d*)') 
+        composition = {}
+        for atom, n in pattern.findall(calc_formula):
+            if atom == 'X':
+                continue
+            try:
+                count = int(n) if n else 1
+            except ValueError:
+                count = 1
+            composition[atom] = composition.get(atom, 0) + count
+        return composition
+
+    AU_to_cm = 1.496e13  
+    phases_pool = ["all", "grain", "mantle", "surface", "gas"]
+
+    # --- 1. RECONSTRUCT RADIAL GRID ---
+    radii_map = {}
+    for original_key in main_output_dict.keys():
+        digits = re.findall(r'\d+', str(original_key))
+        if digits:
+            try:
+                rad_int = int(digits[0])
+                radii_map[rad_int] = original_key
+            except ValueError:
+                continue
+                
+    radii = sorted(list(radii_map.keys()))
+    
+    if len(radii) == 0:
+        if verbose: print("Main output dictionary is empty or contains no valid numerical keys.")
+        return
+        
+    if len(radii) > 1:
+        r_midshifts = 0.5 * np.diff(radii)
+        r_edges = [radii[0] - r_midshifts[0]] + [radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [radii[-1] + r_midshifts[-1]]
+    else:
+        r_edges = [radii[0] * 0.9, radii[0] * 1.1]
+
+    # --- 2. PRE-PARSING NETWORK SPECIES TO BUILD STATIC MAPS ---
+    first_r_key = radii_map[radii[0]]
+    all_network_species = list(main_output_dict[first_r_key]['abundances'].coords['species'].values)
+    
+    species_metadata = []
+    unique_elements = set()
+    
+    for idx, sp in enumerate(all_network_species):
+        if "GRAIN" in sp:
+            species_metadata.append((None, None, {}))
+            continue
+        sp_phase, sp_bin, clean_formula = parse_species(sp)
+        elem_map = get_chemical_composition(clean_formula)
+        species_metadata.append((sp_phase, sp_bin, elem_map))
+        for elem in elem_map.keys():
+            unique_elements.add(elem)
+            
+    # Sort elements strictly by atomic mass weights
+    unique_elements = sorted(list(unique_elements), key=lambda e: atomic_masses.get(e, 999.0))
+    num_elements = len(unique_elements)
+
+    # Dictionary to store accumulated disk-wide total absolute atom sums
+    disk_total_budgets = {p: {elem: 0.0 for elem in unique_elements} for p in phases_pool}
+
+    # --- 3. DATA ACCUMULATION PER CELL SHELL (VECTORIZED) ---
+    for i, r_value in enumerate(radii):
+        folder_name = f"{r_value}AU"
+        file_path = os.path.join(chempath, folder_name, "1D_static.dat")
+        
+        if os.path.exists(file_path):
+            try:
+                z_points = np.loadtxt(file_path, comments='!', usecols=0)
+                orig_key = radii_map[r_value]
+                sub_dict = main_output_dict[orig_key]
+                
+                abundance_array = sub_dict['abundances']
+                nH_profile = sub_dict["H_number_density"][itime,:]
+                
+                if len(z_points) > 1:
+                    z_midshifts = 0.5 * np.diff(z_points)
+                    z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
+                    dz = np.abs(np.diff(z_edges))
+                else:
+                    dz = np.array([z_points[0] if z_points[0] > 0 else 1.0])
+                
+                r_left = r_edges[i] * AU_to_cm
+                r_right = r_edges[i+1] * AU_to_cm
+                dR = r_right - r_left
+                R_center = float(r_value) * AU_to_cm
+                
+                cell_volumes = 2 * np.pi * R_center * dR * (dz * AU_to_cm) 
+                
+                y_abundances_2d = abundance_array.isel(time=itime).values
+                integrated_molecules_per_species = np.sum(y_abundances_2d * nH_profile * cell_volumes, axis=1)
+                
+                coef_matrices = {p: np.zeros((num_elements, len(all_network_species))) for p in phases_pool}
+                
+                for sp_idx, (sp_phase, sp_bin, elem_map) in enumerate(species_metadata):
+                    if sp_phase is None: 
+                        continue
+                        
+                    if grain_bin is not None:
+                        if sp_phase == "gas":
+                            continue
+                        if sp_bin != str(grain_bin):
+                            continue
+                    
+                    for elem_idx, elem in enumerate(unique_elements):
+                        coef = elem_map.get(elem, 0)
+                        if coef > 0:
+                            coef_matrices[sp_phase][elem_idx, sp_idx] = coef
+                            if sp_phase in ["surface", "mantle"]:
+                                coef_matrices["grain"][elem_idx, sp_idx] = coef
+                            coef_matrices["all"][elem_idx, sp_idx] = coef
+
+                for p in phases_pool:
+                    integrated_atoms_per_element = np.dot(coef_matrices[p], integrated_molecules_per_species)
+                    for elem_idx, elem in enumerate(unique_elements):
+                        disk_total_budgets[p][elem] += integrated_atoms_per_element[elem_idx]
+
+            except Exception as e:
+                if verbose: print(f"Error processing cell matrix for R={r_value}: {e}")
+        elif verbose: 
+            print(f"File not found: {file_path}")
+
+    # --- 4. COLOR ASSIGNMENT VIA COLORMAP ---
+    try:
+        cmap = plt.get_cmap(cmap_name)
+    except ValueError:
+        if verbose: print(f"Colormap '{cmap_name}' not found. Falling back to default 'Set1'.")
+        cmap = plt.get_cmap("Set1")
+        
+    phase_colors = {phase_key: cmap(idx) for idx, phase_key in enumerate(phases_pool)}
+
+# --- 5. GRAPH CONSTRUCTION WITH LOCAL PHASE HYDROGEN NORMALIZATION ---
+    fig, ax = plt.subplots(figsize=(11, 6))
+    x_indexes = np.arange(num_elements)
+
+    # Ajustement dynamique des phases à tracer selon la présence d'un grain_bin
+    phases_to_plot = ["grain", "mantle", "surface"] if grain_bin is not None else phases_pool
+
+    for phase_key in phases_to_plot:
+        abundance_ratios_to_local_H = []
+        
+        # Pull out the local Hydrogen reference count for THIS specific phase pool
+        local_hydrogen_reference = disk_total_budgets[phase_key].get("H", 0.0)
+        
+        for elem in unique_elements:
+            absolute_phase_val = disk_total_budgets[phase_key][elem]
+            
+            # Divide the element phase budget by the local phase Hydrogen count
+            if local_hydrogen_reference > 0:
+                abundance_ratios_to_local_H.append(absolute_phase_val / local_hydrogen_reference)
+            else:
+                abundance_ratios_to_local_H.append(0.0)
+                
+        abundance_ratios_to_local_H = np.array(abundance_ratios_to_local_H)
+        
+        # Mask 0 values to protect logarithmic scale bounds rendering
+        valid_mask = abundance_ratios_to_local_H > 0
+        
+        if np.any(valid_mask):
+            ax.plot(x_indexes[valid_mask], abundance_ratios_to_local_H[valid_mask], 
+                    label=phase_key.upper(), 
+                    color=phase_colors[phase_key], 
+                    linewidth=2.5, 
+                    marker='o', 
+                    markersize=6, 
+                    alpha=0.9)
+
+    # Format graph grids and axis layouts
+    ax.set_yscale('log')
+    ax.set_ylabel('Abundance Ratio (X_phase / H_phase)', fontsize=12)
+    ax.set_xlabel('Chemical Elements (Sorted by Atomic Mass Weights)', fontsize=12)
+    
+    # Tie the sorted elements text tracking sequence to X ticks
+    ax.set_xticks(x_indexes)
+    ax.set_xticklabels(unique_elements, fontsize=11, fontweight='bold')
+    
+    bin_suffix = f" (Grain Size Bin {grain_bin})" if grain_bin else ""
+    ax.set_title(f"Protoplanetary Disk phase-dependant Elemental Abundances (X/H per phase){bin_suffix}", fontsize=13, fontweight='bold', pad=12)
+    
+    ax.grid(True, which="both", linestyle="--", alpha=0.4)
+    ax.legend(title="Chemical Phases", title_fontsize='11', loc='upper right', frameon=True)
+
+    try:
+        first_r = radii[0]
+        time_seconds = main_output_dict[radii_map[first_r]]['abundances'].coords['time'].values[itime]
+        plt.figtext(0.15, -0.01, f"Data integrated over disk total volume at epoch: $t = {time_seconds/3.156e7:.2e}$ years", 
+                    fontsize=10, style='italic')
+    except:
+        pass
+
+    plt.tight_layout()
+    plt.show()
+
+import os
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_species_evolution_with_grain_size(chempath,
+                                           main_output_dict,
+                                           target_radius,
+                                           itime=-1,
+                                           verbose=True,
+                                           spnumber=5,
+                                           cmap_name="tab10"):
+    """
+    Computes and plots the evolution of the globally dominant ice chemical species 
+    (Surface + Mantle combined) as a function of grain size at a specific disk radius.
+
+    Parameters:
+    -----------
+    chempath : str
+        Path to the directory containing spatial grid subfolders (e.g., '10AU/', '100AU/').
+    main_output_dict : dict
+        Nested dictionary mapping radial keys to data sub-structures.
+    target_radius : int or float
+        The specific radius (in AU) at which the grain size analysis is performed.
+    itime : int, default -1
+        Time index to slice from the multi-epoch data arrays.
+    verbose : bool, default True
+        If True, outputs warning and missing file notifications to the console.
+    spnumber : int, default 5
+        Number of top global chemical species to display across all bins.
+    cmap_name : str, default "tab10"
+        Name of the Matplotlib colormap used to dynamically assign unique colors to species.
+    """
+
+    # --- INTERNAL HELPERS ---
+    def parse_species(species_name):
+        if species_name == 'e-':
+            return "gas", None, "e-"
+        grain_match = re.match(r'^([JK])(\d+)(.+)', species_name)
+        if grain_match:
+            p_code, g_bin, raw_formula = grain_match.groups()
+            sp_phase = "surface" if p_code == 'J' else "mantle"
+            # Keep the raw bin identifier name string (e.g. '01', '1', 'fine'...)
+            sp_bin = g_bin 
+        else:
+            sp_phase = "gas"
+            sp_bin = None
+            raw_formula = species_name
+        clean_formula = raw_formula.replace('c-', '').replace('l-', '')
+        return sp_phase, sp_bin, clean_formula
+
+    AU_to_cm = 1.496e13  
+
+    # --- 1. FIND THE TARGET RADIUS DATA ---
+    radii_map = {}
+    for original_key in main_output_dict.keys():
+        digits = re.findall(r'\d+', str(original_key))
+        if digits:
+            try:
+                radii_map[int(digits[0])] = original_key
+            except ValueError:
+                continue
+                
+    if int(target_radius) not in radii_map:
+        if verbose: print(f"Radius {target_radius} AU not found in main_output_dict.")
+        return
+        
+    orig_key = radii_map[int(target_radius)]
+    sub_dict = main_output_dict[orig_key]
+    abundance_array = sub_dict['abundances']
+    nH_profile = sub_dict["H_number_density"][itime,:]
+    raw_species_list = list(abundance_array.coords['species'].values)
+
+    # --- 2. LOAD PHYSICAL SPATIAL VOLUMES FOR THIS RADIUS ---
+    sorted_all_radii = sorted(list(radii_map.keys()))
+    r_idx = sorted_all_radii.index(int(target_radius))
+    if len(sorted_all_radii) > 1:
+        r_midshifts = 0.5 * np.diff(sorted_all_radii)
+        r_edges = [sorted_all_radii[0] - r_midshifts[0]] + [sorted_all_radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [sorted_all_radii[-1] + r_midshifts[-1]]
+    else:
+        r_edges = [sorted_all_radii[0] * 0.9, sorted_all_radii[0] * 1.1]
+
+    file_path = os.path.join(chempath, f"{int(target_radius)}AU", "1D_static.dat")
+    if not os.path.exists(file_path):
+        if verbose: print(f"File not found: {file_path}")
+        return
+        
+    z_points = np.loadtxt(file_path, comments='!', usecols=0)
+    if len(z_points) > 1:
+        z_midshifts = 0.5 * np.diff(z_points)
+        z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
+        dz = np.abs(np.diff(z_edges))
+    else:
+        dz = np.array([z_points[0] if z_points[0] > 0 else 1.0])
+
+    r_left = r_edges[r_idx] * AU_to_cm
+    r_right = r_edges[r_idx+1] * AU_to_cm
+    cell_volumes = 2 * np.pi * (float(target_radius) * AU_to_cm) * (r_right - r_left) * (dz * AU_to_cm)
+    
+    nH_2d = nH_profile[np.newaxis, :]
+    volumes_2d = cell_volumes[np.newaxis, :]
+
+    # --- 3. HARVEST AND CACHE ALL VALID DUST BINS AND METALISTS ---
+    available_bins_set = set()
+    species_metadata = {} 
+
+    for sp in raw_species_list:
+        if "GRAIN" in sp:
+            continue
+        sp_phase, sp_bin, clean_formula = parse_species(sp)
+        # Isolate only ice matrices (surface + mantle components)
+        if sp_phase in ["surface", "mantle"] and sp_bin is not None:
+            available_bins_set.add(sp_bin)
+            species_metadata[sp] = (sp_phase, sp_bin, clean_formula)
+
+    # Convert to sorted list to keep stable X tracking indexes. 
+    # Tries integer sort fallback if labels are numbers as strings.
+    try:
+        sorted_bins = sorted(list(available_bins_set), key=lambda x: int(x))
+    except ValueError:
+        sorted_bins = sorted(list(available_bins_set))
+
+    if not sorted_bins:
+        print(f"No ice-coated dust grain bins detected at R={target_radius} AU.")
+        return
+
+    # Intermediate storage dictionaries
+    bin_raw_data = {b: {} for b in sorted_bins}
+    global_species_scores = {} 
+
+    # --- 4. DATA ACCUMULATION PER DUST SIZE CLASS ---
+    for sp in raw_species_list:
+        if sp not in species_metadata:
+            continue
+        sp_phase, sp_bin, clean_formula = species_metadata[sp]
+
+        # Extract 1D altitude profile array, compute cumulative volume physical mass particles
+        y_values = abundance_array.isel(time=itime).sel(species=sp).values
+        absolute_particles = np.sum(y_values * nH_2d * volumes_2d)
+        
+        if absolute_particles > 0:
+            # Combine surface + mantle counts for this clean molecule entry inside its respective size bin
+            bin_raw_data[sp_bin][clean_formula] = bin_raw_data[sp_bin].get(clean_formula, 0.0) + absolute_particles
+            # Track absolute overall molecule abundance across all sizes to determine global dominance ranking
+            global_species_scores[clean_formula] = global_species_scores.get(clean_formula, 0.0) + absolute_particles
+
+    if not global_species_scores:
+        print(f"No ice molecules detected on dust grains at R={target_radius} AU.")
+        return
+
+    # Extract Top N globally significant molecules tracking
+    sorted_global_species = sorted(global_species_scores.items(), key=lambda x: x[1], reverse=True)
+    top_global_species = [item[0] for item in sorted_global_species[:spnumber]]
+
+    # --- 5. GRAPH CONSTRUCTION ---
+    fig, ax = plt.subplots(figsize=(11, 6))
+    
+    try:
+        cmap = plt.get_cmap(cmap_name)
+    except ValueError:
+        if verbose: print(f"Colormap '{cmap_name}' not found. Falling back to default 'tab10'.")
+        cmap = plt.get_cmap("tab10")
+        
+    species_colors = {sp: cmap(idx / max(1, spnumber - 1)) for idx, sp in enumerate(top_global_species)}
+
+    plot_percentages = {sp: [] for sp in top_global_species}
+    x_positions = np.arange(len(sorted_bins))
+    # Read the explicit folder/bin string names directly for the X axis labels
+    x_ticks_labels = [f"Bin {b}" for b in sorted_bins]
+
+    for b in sorted_bins:
+        total_bin_ice_budget = sum(bin_raw_data[b].values())
+        for sp in top_global_species:
+            if total_bin_ice_budget > 0:
+                # Fraction contribution normalized per specific dust bin size shell
+                pct = (bin_raw_data[b].get(sp, 0.0) / total_bin_ice_budget) * 100
+                plot_percentages[sp].append(pct)
+            else:
+                plot_percentages[sp].append(0.0)
+
+    # Plot lines tracking profiles
+    for sp in top_global_species:
+        ax.plot(x_positions, plot_percentages[sp], 
+                label=sp, 
+                color=species_colors[sp], 
+                linewidth=2.5, 
+                marker='o', 
+                markersize=6)
+
+    # Format frame axis and labels
+    ax.set_xlabel('Grain Bins', fontsize=12)
+    ax.set_ylabel('Ice Mantle + Surface Molecule Budget Contribution (%)', fontsize=12)
+    
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(x_ticks_labels, fontsize=10, fontweight='bold')
+    
+    ax.set_ylim(-2, 105)
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.legend(title="Top Global Ice Species", title_fontsize='11', loc='upper right',ncol=2)
+    
+    try:
+        time_seconds = abundance_array.coords['time'].values[itime]
+        ax.set_title(f'Top {spnumber} Ice Species (Surface + Mantle) vs Grain Size\n$R = {target_radius}$ AU — $t = {time_seconds/3.156e7:.2e}$ years (Locally Normalized)', fontsize=12, fontweight='bold', pad=12)
+    except:
+        ax.set_title(f'Top {spnumber} Ice Species (Surface + Mantle) vs Grain Size\n$R = {target_radius}$ AU', fontsize=12, fontweight='bold', pad=12)
 
     plt.tight_layout()
     plt.show()

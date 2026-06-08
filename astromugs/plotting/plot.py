@@ -3015,11 +3015,17 @@ import re
 import numpy as np
 import matplotlib.pyplot as plt
 
+import os
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+
 def plot_ratio_midplane_gas_vs_grain(chempath,
                                     main_output_dict,
                                     s1="C",
                                     s2="O",
                                     itime=-1,
+                                    starratio=None,
                                     verbose=True,
                                     xlim=None,
                                     ylim=None):
@@ -3036,6 +3042,7 @@ def plot_ratio_midplane_gas_vs_grain(chempath,
         s1 (str, optional): Atomic symbol for the numerator element. Defaults to "C".
         s2 (str, optional): Atomic symbol for the denominator element. Defaults to "O".
         itime (int, optional): Time index to slice from the abundance arrays. Defaults to -1.
+        starratio (float, optional): Ratio s1/s2 of the star. Defaults to None.
         verbose (bool, optional): If True, prints status and error messages. Defaults to True.
         xlim (tuple of float, optional): Manual limits for the horizontal Radius axis.
         ylim (tuple of float, optional): Manual limits for the vertical Ratio axis.
@@ -3162,6 +3169,9 @@ def plot_ratio_midplane_gas_vs_grain(chempath,
         ax.set_title(f'Atomic Ratio {s1}/{s2} at Midplane ($z=0$) — $t = {time_seconds/3.156e7:.2e}$ yr', fontsize=12, pad=12)
     except:
         ax.set_title(f'Atomic Ratio {s1}/{s2} at Midplane ($z=0$)', fontsize=12, pad=12)
+
+    if starratio is not None:
+        ax.axhline(y=starratio,color='black',linestyle='--',label=f'Star {s1}/{s2} ratio')
 
     # Apply manual axis boundaries if supplied
     if xlim is not None: ax.set_xlim(xlim)

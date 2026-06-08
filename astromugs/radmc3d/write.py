@@ -255,7 +255,7 @@ def gas_temperature(temp, thermpath='thermal/'):
                 f.write(f"{temp[ix, iy]:.6e}\n")
 
 
-def lines(species, format_list='leiden', thermpath='thermal/'):
+def lines(species, format='leiden', thermpath='thermal/'):
     """
     Desc: Write the lines.inp file for multiple species (RADMC-3D)
     Args:
@@ -268,10 +268,10 @@ def lines(species, format_list='leiden', thermpath='thermal/'):
     if isinstance(species, str):
         species = [species]
     n_species = len(species)
-    if isinstance(format_list, str):
-        formats = [format_list] * n_species
+    if isinstance(format, str):
+        formats = [format] * n_species
     else:
-        formats = format_list
+        formats = format
     with open(thermpath + "lines.inp", "w") as f:
         f.write("2\n")
         f.write(f"{n_species}\n")

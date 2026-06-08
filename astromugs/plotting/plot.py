@@ -1398,20 +1398,20 @@ def plot_outputs_nautilus(chempath,
         plt.show()
 
 
-def plot_midplane_nautilus(main_output_dict,
-                           itime=-1,
-                           MODE='chemistry',
-                           KEY_NAME='CO',
-                           VARIABLE_LABEL="Fractional Abundance of CO [$n_{X}/n_{H}$]",
-                           fracab=True,
-                           verbose=True,
-                           xlim=None,
-                           ylim=None,
-                           color="crimson",
-                           vmin=None,
-                           vmax=None):
+def plot_midplane_nautilus_multi(main_output_dict,
+                                 itime=-1,
+                                 MODE='chemistry',
+                                 KEY_NAMES=['CO'],
+                                 VARIABLE_LABEL="Fractional Abundance [$n_{X}/n_{H}$]",
+                                 fracab=True,
+                                 verbose=True,
+                                 xlim=None,
+                                 ylim=None,
+                                 cmap_name="turbo",
+                                 vmin=None,
+                                 vmax=None):
     """
-    Plots a 1D radial profile of a variable strictly at the disk midplane (z = 0).
+    Plots 1D radial profiles of multiple variables/species strictly at the disk midplane (z = 0).
 
     Args:
         main_output_dict (dict): Master dictionary storing the simulation outputs,
@@ -1420,97 +1420,131 @@ def plot_midplane_nautilus(main_output_dict,
             Defaults to -1 (the final timestep).
         MODE (str, optional): Type of variable to plot. Options are 'chemistry' 
             or 'physical'. Defaults to 'chemistry'.
-        KEY_NAME (str, optional): Dict key name for a 'physical' variable, or the 
-            chemical species formula string for 'chemistry' mode. Defaults to 'CO'.
+        KEY_NAMES (list of str, optional): List of dict keys for 'physical' variables, 
+            or chemical species formula strings for 'chemistry' mode. Defaults to ['CO'].
         VARIABLE_LABEL (str, optional): Label displayed along the vertical axis. 
-            Defaults to "Fractional Abundance of CO [$n_{X}/n_{H}$]".
+            Defaults to "Fractional Abundance [$n_{X}/n_{H}$]".
         fracab (bool, optional): If True, plots raw fractional abundances. If False, 
             multiplies abundances by the total hydrogen number density (nH). Defaults to True.
         verbose (bool, optional): If True, prints diagnostic processing errors. Defaults to True.
         xlim (tuple of float, optional): Custom (min, max) boundaries for the Radius axis.
         ylim (tuple of float, optional): Custom (min, max) boundaries for the vertical axis.
-        color (str, optional): Line/marker color for the plot. Defaults to "crimson".
+        cmap_name (str, optional): Matplotlib colormap name used to color the different lines.
+            Defaults to "turbo".
         vmin (float, optional): Forced lower bound for the vertical scale.
         vmax (float, optional): Forced upper bound for the vertical scale.
 
     Returns:
-        None: Displays a Matplotlib pyplot 1D line figure.
+        None: Displays a Matplotlib pyplot 1D line figure with multiple curves.
     """
-    radii_list = []
-    values_list = []
+    # Force KEY_NAMES to be a list if the user accidentally passes a single string
+    if isinstance(KEY_NAMES, str):
+        KEY_NAMES = [KEY_NAMES]
 
-    # Loop directly over your dictionary keys (5, 10, 15, etc.)
-    for r_value in main_output_dict.keys():
-        try:
-            sub_dict = main_output_dict[r_value]
-            
-            # CRITICAL: In Nautilus 1D grid arrays, index -1 represents the midplane (z = 0)
-            MIDPLANE_INDEX = -1 
-            
-            # Extract the single value at the midplane
-            if MODE == 'physical':
-                full_array = sub_dict[KEY_NAME]
-                v_midplane = full_array[itime, MIDPLANE_INDEX]
-            elif MODE == 'chemistry':
-                abundance_array = sub_dict['abundances']
-                v_midplane = float(abundance_array.isel(time=itime).sel(species=KEY_NAME).values[MIDPLANE_INDEX])
+    # --- PLOT INITIALIZATION ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Generate colors from the specified colormap
+    # If there is only one species, pick the center of the colormap; otherwise, distribute evenly
+    if len(KEY_NAMES) == 1:
+        colors = [plt.get_cmap(cmap_name)(0.5)]
+    else:
+        colors = plt.get_cmap(cmap_name)(np.linspace(0, 1, len(KEY_NAMES)))
+
+    # Track valid min and max values across all species to handle log-scale limits correctly
+    all_valid_mins = []
+    all_valid_maxs = []
+
+    # --- LOOP OVER EACH SPECIES / VARIABLE ---
+    for idx, key in enumerate(KEY_NAMES):
+        radii_list = []
+        values_list = []
+
+        for r_value in main_output_dict.keys():
+            try:
+                sub_dict = main_output_dict[r_value]
                 
-                if not fracab:
-                    nH_midplane = sub_dict["H_number_density"][itime, MIDPLANE_INDEX]
-                    v_midplane = v_midplane * nH_midplane
-            
-            radii_list.append(float(r_value))
-            values_list.append(v_midplane)
-            
-        except Exception as e:
+                # CRITICAL: In Nautilus 1D grid arrays, index -1 represents the midplane (z = 0)
+                MIDPLANE_INDEX = -1 
+                
+                # Extract the single value at the midplane
+                if MODE == 'physical':
+                    full_array = sub_dict[key]
+                    v_midplane = full_array[itime, MIDPLANE_INDEX]
+                elif MODE == 'chemistry':
+                    abundance_array = sub_dict['abundances']
+                    v_midplane = float(abundance_array.isel(time=itime).sel(species=key).values[MIDPLANE_INDEX])
+                    
+                    if not fracab:
+                        nH_midplane = sub_dict["H_number_density"][itime, MIDPLANE_INDEX]
+                        v_midplane = v_midplane * nH_midplane
+                
+                radii_list.append(float(r_value))
+                values_list.append(v_midplane)
+                
+            except Exception as e:
+                if verbose:
+                    print(f"Error processing midplane data for R={r_value}, Key={key}: {e}")
+
+        if not radii_list:
             if verbose:
-                print(f"Error processing midplane data for R={r_value}: {e}")
+                print(f"No data collected for Key: {key}. Skipping.")
+            continue
 
-    if not radii_list:
-        if verbose:
-            print("No data collected for the midplane plot. Check your keys.")
-        return
+        # Sort arrays by radius to ensure the plotted line connects points sequentially
+        sort_indices = np.argsort(radii_list)
+        radii_arr = np.array(radii_list)[sort_indices]
+        values_arr = np.array(values_list)[sort_indices]
 
-    # Sort arrays by radius to ensure the plotted line connects points sequentially
-    sort_indices = np.argsort(radii_list)
-    radii_arr = np.array(radii_list)[sort_indices]
-    values_arr = np.array(values_list)[sort_indices]
+        # Store min/max values for automatic Y-axis scaling
+        pos_values = values_arr[values_arr > 0]
+        if len(pos_values) > 0:
+            all_valid_mins.append(pos_values.min())
+        all_valid_maxs.append(values_arr.max())
 
-    # --- PLOTTING ---
-    fig, ax = plt.subplots(figsize=(9, 5))
+        # Plot line and marker dots for the current species
+        ax.plot(radii_arr, values_arr, color=colors[idx], linestyle='-', marker='o', 
+                markersize=5, linewidth=1.5, label=key)
 
+    # --- SCALE AND AXIS LIMIT MANAGEMENT ---
     # Determine whether to use a logarithmic vertical axis
-    if MODE == 'chemistry' or "density" in KEY_NAME.lower() or "extinction" in KEY_NAME.lower():
+    is_log = MODE == 'chemistry' or any("density" in k.lower() or "extinction" in k.lower() for k in KEY_NAMES)
+    
+    if is_log:
         ax.set_yscale('log')
-        # Fallback value checking to prevent log(0) crash loops
-        actual_vmin = vmin if vmin is not None else max(1e-15, values_arr[values_arr > 0].min() if any(values_arr > 0) else 1e-15)
-        actual_vmax = vmax if vmax is not None else values_arr.max()
+        # Fallback value checking to prevent log(0) crash loops across all curves
+        global_min = min(all_valid_mins) if all_valid_mins else 1e-15
+        global_max = max(all_valid_maxs) if all_valid_maxs else 1.0
+        
+        actual_vmin = vmin if vmin is not None else max(1e-15, global_min)
+        actual_vmax = vmax if vmax is not None else global_max
         ax.set_ylim(actual_vmin, actual_vmax)
     else:
         if vmin is not None or vmax is not None:
             ax.set_ylim(vmin, vmax)
 
-    # Plot both a line and marker dots so sparse radii points are clearly visible
-    ax.plot(radii_arr, values_arr, color=color, linestyle='-', marker='o', markersize=6, linewidth=1.5)
-
-    # Labels and Titles
+    # --- LABELS AND TITLE CONFIGURATION ---
     ax.set_xlabel('Radius R [AU]')
     ax.set_ylabel(VARIABLE_LABEL)
     
+    # Attempt to read and parse the time coordinate in years
     try:
-        time_seconds = main_output_dict[radii_list[0]]['abundances'].coords['time'].values[itime]
+        first_r = list(main_output_dict.keys())[0]
+        time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
         ax.set_title(f'Midplane ($z = 0$) Profile at $t = {time_seconds/3.156e7:.2e}$ years')
     except:
-        ax.set_title(f'Midplane ($z = 0$) Profile - {KEY_NAME}')
+        ax.set_title('Midplane ($z = 0$) Profile')
 
     # Apply manual axis overrides if supplied
     if xlim is not None: ax.set_xlim(xlim)
     if ylim is not None: ax.set_ylim(ylim)
 
+    # Add legend to identify the plotted species
+    ax.legend(loc='best', frameon=True, shadow=False)
+    
     ax.grid(True, linestyle=':', alpha=0.5)
     plt.tight_layout()
     plt.show()
-
 
 
 def plot_grain_surface_midplane(chempath,

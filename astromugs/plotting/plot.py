@@ -1608,7 +1608,8 @@ def plot_grain_surface_midplane(chempath,
     plt.tight_layout()
     plt.show()
 
-def plot_vertical_cut_nautilus(main_output_dict,
+def plot_vertical_cut_nautilus(chempath,
+                              main_output_dict,
                               R,
                               species='CO',
                               itime=-1,
@@ -1624,6 +1625,8 @@ def plot_vertical_cut_nautilus(main_output_dict,
 
     Parameters:
     -----------
+    chempath : str
+        Path to NMGC chemistry outputs
     main_output_dict : dict
         Dictionary containing the NAUTILUS simulation outputs (e.g. pipe.chemistry)
     R : int or float
@@ -1667,7 +1670,7 @@ def plot_vertical_cut_nautilus(main_output_dict,
 
     # Load the vertical grid (z) from the static 1D structure file for this radius
     static = pd.read_table(
-        f'{chemistry_path}/{R}AU/1D_static.dat',
+        f'{chempath}/{R}AU/1D_static.dat',
         sep=r'\s+', comment='!', header=None, engine='python'
     )
     z = static[0].values   # z coordinate in [AU], ranging from surface to midplane

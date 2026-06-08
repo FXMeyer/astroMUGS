@@ -255,16 +255,26 @@ def gas_temperature(temp, thermpath='thermal/'):
                 f.write(f"{temp[ix, iy]:.6e}\n")
 
 
-def lines(species='CO', format='leiden', thermpath='thermal/'):
-    '''
-    Desc: write lines.inp
-    Args: species, format
-    '''
-    f = open(thermpath + "lines.inp","w")
-    f.write("2\n")
-    f.write("1\n")
-    f.write("{} {} 0 0 0".format(species,format))
-    f.close()
+def lines(species_list, format_list='leiden', thermpath='thermal/'):
+    """
+    Desc: Écrit le fichier lines.inp pour plusieurs espèces (RADMC-3D)
+    Args:
+        species_list (list): Liste des noms de molécules/atomes (ex: ['co', 'h2o'])
+        format_list (str ou list): Format(s) d'entrée ('leiden' ou 'linelist').
+                                   Peut être une chaîne unique (appliquée à tous) 
+                                   ou une liste de même taille que species_list.
+        thermpath (str): Chemin d'accès vers le dossier de destination.
+    """
+    n_species = len(species_list)
+    if isinstance(format_list, str):
+        formats = [format_list] * n_species
+    else:
+        formats = format_list
+    with open(thermpath + "lines.inp", "w") as f:
+        f.write("2\n")
+        f.write(f"{n_species}\n")
+        for spec, fmt in zip(species_list, formats):
+            f.write(f"{spec} {fmt} 0 0 0\n")
 
 
 def gas_velocity(star_mass, r, theta, phi, object="disk", thermpath='thermal/'):

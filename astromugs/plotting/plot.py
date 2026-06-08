@@ -3009,3 +3009,176 @@ def plot_species_evolution_with_grain_size(chempath,
 
     plt.tight_layout()
     plt.show()
+
+import os
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_ratio_midplane_gas_vs_grain(chempath,
+                                    main_output_dict,
+                                    s1="C",
+                                    s2="O",
+                                    itime=-1,
+                                    verbose=True,
+                                    xlim=None,
+                                    ylim=None):
+    """Plots the midplane (z=0) atomic abundance ratio of two elements for gas vs. grain phases.
+
+    This function extracts multi-species chemical abundances at the disk midplane 
+    across all simulated radii. It classifies species into either gas-phase or grain-phase 
+    (ice surface + mantle reservoirs), computes the aggregated elemental ratio (s1/s2) 
+    for each phase, and renders a comparative 1D radial line plot.
+
+    Args:
+        chempath (str): Path to the directory containing radial subfolders.
+        main_output_dict (dict): Nested dictionary containing simulation outputs.
+        s1 (str, optional): Atomic symbol for the numerator element. Defaults to "C".
+        s2 (str, optional): Atomic symbol for the denominator element. Defaults to "O".
+        itime (int, optional): Time index to slice from the abundance arrays. Defaults to -1.
+        verbose (bool, optional): If True, prints status and error messages. Defaults to True.
+        xlim (tuple of float, optional): Manual limits for the horizontal Radius axis.
+        ylim (tuple of float, optional): Manual limits for the vertical Ratio axis.
+
+    Raises:
+        ValueError: If either s1 or s2 is not included in the allowed chemical network.
+    """
+    
+    # Define valid chemical network elements
+    elements = ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 'Mg', 'Cl', 'P', 'F']
+    if s1 not in elements or s2 not in elements:
+        raise ValueError("One of the specified elements does not exist in the chemical network.")
+
+    # --- INTERNAL SPECIES PARSER AND ELEMENT COUNTER ---
+    def parse_and_count(species_name, element1, element2):
+        """Identifies the chemical phase and counts target atoms in a species formula."""
+        # Ignore electrons and generic structural grain notations
+        if species_name == 'e-' or 'GRAIN' in species_name: 
+            return "ignore", 0, 0
+            
+        # Match surface (J) and mantle (K) ice species strings
+        grain_match = re.match(r'^([JK])\d+(.+)', species_name)
+        if grain_match:
+            sp_phase = "grain"  
+            raw_formula = grain_match.group(2)
+        else:
+            sp_phase = "gas"
+            raw_formula = species_name
+            
+        # Clean up structural isomer markers, trailing charge states, and internal hyphens
+        clean_formula = raw_formula.replace('c-', '').replace('l-', '')
+        if clean_formula.endswith('+') or clean_formula.endswith('-'):
+            clean_formula = clean_formula[:-1]
+        clean_formula = clean_formula.replace('-', '')
+        
+        # Regex parsing to extract atomic counts
+        pattern = re.compile(r'([A-Z][a-z]?)(\d*)')
+        composition = {}
+        for atom, n in pattern.findall(clean_formula):
+            try:
+                count = int(n) if n else 1
+            except ValueError:
+                count = 1
+            composition[atom] = composition.get(atom, 0) + count
+            
+        return sp_phase, composition.get(element1, 0), composition.get(element2, 0)
+
+    # --- DATA ACCUMULATION ---
+    radii_list = []
+    ratio_gas_list = []
+    ratio_grain_list = []
+
+    # Map string keys to numerical radius values for proper spatial sorting
+    radii_map = {}
+    for original_key in main_output_dict.keys():
+        digits = re.findall(r'\d+', str(original_key))
+        if digits:
+            radii_map[int(digits[0])] = original_key
+            
+    sorted_radii_ints = sorted(list(radii_map.keys()))
+
+    # Loop over sorted radial bins to retrieve midplane abundances
+    for r_int in sorted_radii_ints:
+        orig_key = radii_map[r_int]
+        sub_dict = main_output_dict[orig_key]
+        abundance_array = sub_dict['abundances']
+        
+        # Extract abundances at the disk midplane (deepest vertical grid cell -> index -1)
+        # Expected array slice format: (species,)
+        midplane_abundances = abundance_array.isel(time=itime, spatial=-1).values
+        species_list = list(abundance_array.coords['species'].values)
+        
+        # Reset atomic accumulation pools for this radius
+        total_s1_gas, total_s2_gas = 0.0, 0.0
+        total_s1_grain, total_s2_grain = 0.0, 0.0
+        
+        # Aggregate physical atomic pools across all network species
+        for idx, species in enumerate(species_list):
+            phase, c1, c2 = parse_and_count(species, s1, s2)
+            abundance = midplane_abundances[idx]
+            
+            if phase == "gas":
+                total_s1_gas += abundance * c1
+                total_s2_gas += abundance * c2
+            elif phase == "grain":
+                total_s1_grain += abundance * c1
+                total_s2_grain += abundance * c2
+
+        # Compute ratios with protective fallback division checks against empty reservoirs
+        gas_ratio = total_s1_gas / total_s2_gas if total_s2_gas > 0 else 0.0
+        grain_ratio = total_s1_grain / total_s2_grain if total_s2_grain > 0 else 0.0
+        
+        radii_list.append(float(r_int))
+        ratio_gas_list.append(gas_ratio)
+        ratio_grain_list.append(grain_ratio)
+
+    if not radii_list:
+        if verbose: print("No matching physical grid data could be collected.")
+        return
+
+    # Convert python collections to structured numpy arrays
+    radii_arr = np.array(radii_list)
+    gas_arr = np.array(ratio_gas_list)
+    grain_arr = np.array(ratio_grain_list)
+
+    # --- PLOTTING ---
+    fig, ax = plt.subplots(figsize=(9, 5))
+    
+    # Apply a logarithmic scale to account for sharp chemical variations
+    ax.set_yscale('log')
+    
+    # Render line tracks + markers for each discrete phase
+    ax.plot(radii_arr, gas_arr, color="teal", linestyle='-', marker='o', label='Gas', linewidth=1.8)
+    ax.plot(radii_arr, grain_arr, color="darkred", linestyle='--', marker='s', label='Grains (Ice)', linewidth=1.8)
+
+    # Label definitions
+    ax.set_xlabel('Radius R [AU]', fontsize=11)
+    ax.set_ylabel(f'Midplane Atomic Ratio [{s1}/{s2}]', fontsize=11)
+    
+    # Safely parse coordinate timestamps for dynamic title labeling
+    try:
+        first_key = radii_map[sorted_radii_ints[0]]
+        time_seconds = main_output_dict[first_key]['abundances'].coords['time'].values[itime]
+        ax.set_title(f'Atomic Ratio {s1}/{s2} at Midplane ($z=0$) — $t = {time_seconds/3.156e7:.2e}$ yr', fontsize=12, pad=12)
+    except:
+        ax.set_title(f'Atomic Ratio {s1}/{s2} at Midplane ($z=0$)', fontsize=12, pad=12)
+
+    # Apply manual axis boundaries if supplied
+    if xlim is not None: ax.set_xlim(xlim)
+    if ylim is not None: ax.set_ylim(ylim)
+    
+    # Auto-scale vertical bounds while avoiding log(0) clipping exceptions
+    if ylim is None:
+        all_vals = np.concatenate([gas_arr, grain_arr])
+        positive_vals = all_vals[all_vals > 0]
+        if len(positive_vals) > 0:
+            ax.set_ylim(positive_vals.min() * 0.5, positive_vals.max() * 2)
+        else:
+            ax.set_ylim(1e-4, 1e2)
+
+    # Render grid lines and legendary context block
+    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.legend(frameon=True, facecolor='white', edgecolor='gainsboro', loc='best')
+    
+    plt.tight_layout()
+    plt.show()

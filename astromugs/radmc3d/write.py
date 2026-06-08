@@ -257,14 +257,16 @@ def gas_temperature(temp, thermpath='thermal/'):
 
 def lines(species_list, format_list='leiden', thermpath='thermal/'):
     """
-    Desc: Écrit le fichier lines.inp pour plusieurs espèces (RADMC-3D)
+    Desc: Write the lines.inp file for multiple species (RADMC-3D)
     Args:
-        species_list (list): Liste des noms de molécules/atomes (ex: ['co', 'h2o'])
-        format_list (str ou list): Format(s) d'entrée ('leiden' ou 'linelist').
-                                   Peut être une chaîne unique (appliquée à tous) 
-                                   ou une liste de même taille que species_list.
-        thermpath (str): Chemin d'accès vers le dossier de destination.
+        species_list (list): List of molecule/atom names (e.g., ['co', 'h2o'])
+        format_list (str or list): Input format(s) ('leiden' or 'linelist').
+                                   Can be a single string (applied to all species)
+                                   or a list of the same length as species_list.
+        thermpath (str): Path to the destination directory.
     """
+    if isinstance(species_list, str):
+        species_list = [species_list]
     n_species = len(species_list)
     if isinstance(format_list, str):
         formats = [format_list] * n_species

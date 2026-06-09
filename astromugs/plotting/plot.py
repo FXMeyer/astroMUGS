@@ -2467,7 +2467,7 @@ def plot_top_contributing_species(chempath,
     try:
         first_r = radii[0]
         time_seconds = main_output_dict[radii_map[first_r]]['abundances'].coords['time'].values[itime]
-        ax.set_title(f'Top {spnumber} Reservoirs for Element [{target_atom}] — {phase_title}\n$t = {time_seconds/3.156e7:.2e}$ years (Volume Integrated)', fontsize=13, pad=15)
+        ax.set_title(f'Top {spnumber} Reservoirs for Element [{target_atom}] — {phase_title}\n$t = {time_seconds/3.156e7:.0f}$ years', fontsize=13, pad=15)
     except:
         ax.set_title(f'Top {spnumber} Reservoirs for Element [{target_atom}] — {phase_title}', fontsize=13, pad=15)
         

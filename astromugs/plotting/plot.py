@@ -3540,7 +3540,7 @@ def plot_ratio_midplane_gas_vs_grain(chempath,
     fig, ax = plt.subplots(figsize=(9, 5))
     
     # Apply a logarithmic scale to account for sharp chemical variations
-    if max(np.max(gas_arr),np.max(grain_arr))/main(np.min(gas_arr),np.min(grain_arr)) > 10 : ax.set_yscale('log')
+    if max(np.max(gas_arr),np.max(grain_arr))/min(np.min(gas_arr),np.min(grain_arr)) > 10 : ax.set_yscale('log')
     else: ax.set_yscale('linear')
     
     # Render line tracks + markers for each discrete phase

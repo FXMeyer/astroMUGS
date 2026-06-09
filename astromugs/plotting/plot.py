@@ -1780,11 +1780,11 @@ def plot_grain_surface_midplane(chempath,
 
     # Labels and formatting
     ax.set_xlabel('Radius R [AU]')
-    ax.set_ylabel(r'Total Grain Surface Area $\sim\text{cm}^{2}/\text{cm}^{3}$')
+    ax.set_ylabel(r'Total Grain Surface Area [$text{cm}^{2}/\text{cm}^{3}$]')
     
     try:
         time_seconds = main_output_dict[radii_list[0]]['abundances'].coords['time'].values[itime]
-        ax.set_title(f'Total Grain Surface Area at Midplane ($z=0$) - $t = {time_seconds/3.156e7:.2e}$ yr')
+        ax.set_title(f'Total Grain Surface Area at Midplane ($z=0$) - $t = {time_seconds/3.156e7:.0f}$ yr')
     except:
         ax.set_title('Total Grain Surface Area at Midplane ($z=0$)')
 

@@ -3581,3 +3581,269 @@ def plot_ratio_midplane_gas_vs_grain(chempath,
     
     plt.tight_layout()
     plt.show()
+
+def plot_grain_properties_midplane(chempath,
+                                   main_output_dict,
+                                   key_list=['CO'],
+                                   itime=-1,
+                                   fracab=True,
+                                   verbose=True,
+                                   xlim=None,
+                                   ylim=None,
+                                   Tmin=None,
+                                   Tmax=None,
+                                   temp_colormap='hot',
+                                   ab_colormap='plasma'):
+    """
+    Plots 2D maps of dust grain temperature (smoothly interpolated) and total ice species properties 
+    (Surface J + Mantle K combined inside discrete blocks) strictly at the disk midplane (z = 0) 
+    as a function of Disk Radius (R) and evenly spaced Grain Size (r).
+
+    Filters spatial columns inside the [rmin, rmax] boundary range and applies manual color mapping 
+    thresholds [Tmin, Tmax] over the thermal mesh layout. Supports relative fractional abundances 
+    or absolute volume particle counts pool scaling conversion.
+    """
+    
+    chempath = Path(chempath)
+
+    if isinstance(key_list, str):
+        key_list = [key_list]
+        
+    # Remove duplicate species tokens while preserving order
+    key_list = list(dict.fromkeys(key_list))
+
+    # --- INTERNAL HELPERS ---
+    def parse_grain_sizes_midplane(file_path):
+        """Parses 1D_grain_sizes.in to extract midplane grain radii (µm) and temperatures (K)."""
+        try:
+            valid_lines = []
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('!'):
+                        continue
+                    if '!' in line:
+                        line = line.split('!')[0].strip()
+                    values = [float(val) for val in line.split()]
+                    if values:
+                        valid_lines.append(values)
+            
+            if not valid_lines:
+                return None, None
+            
+            midplane_values = valid_lines[-1]
+            num_grains = len(midplane_values) // 4
+            
+            radii_cm = midplane_values[:num_grains]
+            radii_um = [r * 10000.0 for r in radii_cm]
+            temps_k = midplane_values[2 * num_grains : 3 * num_grains]
+            
+            return radii_um, temps_k
+        except Exception as e:
+            if verbose: print(f"Error parsing {file_path}: {e}")
+            return None, None
+
+    def clean_molec(mol_name):
+        """Cleans and isolates LaTeX subscripts/superscripts for the chemical formula."""
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        return f"${f}$"
+
+    # --- RADIAL COLUMN EXTRACTION WITH BOUNDS FILTERING ---
+    radii_map = {}
+    for original_key in main_output_dict.keys():
+        digits = re.findall(r'\d+', str(original_key))
+        if digits:
+            try:
+                radii_map[int(digits[0])] = original_key
+            except ValueError:
+                continue
+                
+    extracted_radii = sorted(list(radii_map.keys()))
+    
+    # Apply rmin and rmax spatial filters
+    sorted_radii = []
+    for r in extracted_radii:
+        if rmin is not None and r < rmin: continue
+        if rmax is not None and r > rmax: continue
+        sorted_radii.append(r)
+
+    if not sorted_radii:
+        if verbose: print(f"No columns found within specified boundaries [rmin={rmin}, rmax={rmax}].")
+        return
+
+    disk_radii = []
+    grain_sizes_matrix = []
+    grain_temps_matrix = []
+    species_abundance_matrices = {key: [] for key in key_list}
+
+    for r_val in sorted_radii:
+        grain_file = chempath / f"{r_val}AU" / "1D_grain_sizes.in"
+        radii_um, temps_k = parse_grain_sizes_midplane(grain_file)
+        
+        if radii_um is None or temps_k is None:
+            if verbose: print(f"Missing or invalid grain configuration file at {r_val} AU. Skipping.")
+            continue
+            
+        orig_key = radii_map[r_val]
+        sub_dict = main_output_dict[orig_key]
+        abundance_array = sub_dict['abundances']
+        
+        MIDPLANE_INDEX = -1
+        
+        disk_radii.append(r_val)
+        grain_sizes_matrix.append(radii_um)
+        grain_temps_matrix.append(temps_k)
+        
+        for key in key_list:
+            bin_values = []
+            for b_idx in range(1, len(radii_um) + 1):
+                v_cell = 0.0
+                surface_name = f"J{b_idx:02d}{key}"
+                mantle_name  = f"K{b_idx:02d}{key}"
+                
+                # Accumulate ice budget from Surface phase
+                if surface_name in abundance_array.coords['species'].values:
+                    v_cell += float(abundance_array.isel(time=itime).sel(species=surface_name).values[MIDPLANE_INDEX])
+                    
+                # Accumulate ice budget from Mantle phase
+                if mantle_name in abundance_array.coords['species'].values:
+                    v_cell += float(abundance_array.isel(time=itime).sel(species=mantle_name).values[MIDPLANE_INDEX])
+                    
+                # Convert compiled fractional values into physical macroscopic volume pools if requested
+                if not fracab:
+                    nH_midplane = sub_dict["H_number_density"][itime, MIDPLANE_INDEX]
+                    v_cell = v_cell * nH_midplane
+                        
+                bin_values.append(v_cell)
+            species_abundance_matrices[key].append(bin_values)
+
+    if not disk_radii:
+        if verbose: print("No complete columns successfully parsed.")
+        return
+
+    disk_radii = np.array(disk_radii)
+    grain_sizes_matrix = np.array(grain_sizes_matrix) 
+    grain_temps_matrix = np.array(grain_temps_matrix)
+    num_grain_bins = grain_sizes_matrix.shape[1]
+
+    # --- 2D MESH MAPPING (POLYGON PANEL ASSEMBLY) ---
+    if len(disk_radii) > 1:
+        r_midshifts = 0.5 * np.diff(disk_radii)
+        r_edges = [disk_radii[0] - r_midshifts[0]] + [disk_radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [disk_radii[-1] + r_midshifts[-1]]
+    else:
+        r_edges = [disk_radii[0] - 0.5, disk_radii[0] + 0.5]
+
+    y_centers = np.arange(num_grain_bins)
+    y_edges = np.arange(num_grain_bins + 1) - 0.5
+
+    # Structure to hold discrete species plot structures
+    unit_str = "Abundance [$n_{\\rm ice}/n_H$]" if fracab else "Density [$cm^{-3}$]"
+    species_plot_data = {key: {'polygons': [], 'values': [], 'label': f"{clean_molec(key)} Midplane {unit_str}"} for key in key_list}
+
+    for i in range(len(disk_radii)):
+        r_left, r_right = r_edges[i], r_edges[i+1]
+        for j in range(num_grain_bins):
+            z_bottom, z_top = y_edges[j], y_edges[j+1]
+            poly = [(r_left, z_bottom), (r_right, z_bottom), (r_right, z_top), (r_left, z_top)]
+            
+            for key in key_list:
+                species_plot_data[key]['polygons'].append(poly)
+                species_plot_data[key]['values'].append(species_abundance_matrices[key][i][j])
+
+    # --- GEOMETRIC CANVAS CONFIGURATION ---
+    num_plots = len(key_list) + 1
+    cols = min(3, num_plots)
+    rows = (num_plots + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4.0 * rows), squeeze=False,sharex=True, sharey=True)
+    axes = axes.flatten()
+
+    # --- SUBPLOT 1: SMOOTHLY INTERPOLATED GRAIN TEMPERATURE ---
+    ax_temp = axes[0]
+    
+    grid_R, grid_Y = np.meshgrid(
+        np.linspace(disk_radii.min(), disk_radii.max(), 300),
+        np.linspace(y_edges[0], y_edges[-1], 300)
+    )
+    
+    points_R, points_Y, points_T = [], [], []
+    for i, r_val in enumerate(disk_radii):
+        for j, y_val in enumerate(y_centers):
+            points_R.append(r_val)
+            points_Y.append(y_val)
+            points_T.append(grain_temps_matrix[i, j])
+            
+        # Extension anchors to force solid geometric panel plotting bounding boxes
+        points_R.append(r_val)
+        points_Y.append(y_edges[0])
+        points_T.append(grain_temps_matrix[i, 0])
+        
+        points_R.append(r_val)
+        points_Y.append(y_edges[-1])
+        points_T.append(grain_temps_matrix[i, -1])
+            
+    grid_T = griddata((points_R, points_Y), points_T, (grid_R, grid_Y), method='cubic')
+    
+    actual_tmin = Tmin if Tmin is not None else grain_temps_matrix.min()
+    actual_tmax = Tmax if Tmax is not None else grain_temps_matrix.max()
+    contour_levels = np.linspace(actual_tmin, actual_tmax, 100)
+    
+    cf = ax_temp.contourf(grid_R, grid_Y, grid_T, levels=contour_levels, cmap=temp_colormap)
+    fig.colorbar(cf, ax=ax_temp, label="Grain Temperature $T_{\\rm grain}$ [K]")
+    
+    ax_temp.set_xlabel('Disk Radius R [AU]', fontsize=11)
+    ax_temp.set_ylabel('Grain Size radius $r$ [µm]', fontsize=11)
+    ax_temp.set_title("Grain Temperature $T_{\\rm grain}$", fontsize=12, fontweight='bold')
+
+    # --- SUBPLOTS 2+: DISCRETE SPECIES MAPS ---
+    for idx, key in enumerate(key_list):
+        ax = axes[idx + 1]
+        struct = species_plot_data[key]
+        vals = np.array(struct['values'])
+        
+        positive_values = vals[vals > 0]
+        v_min, v_max = vals.min(), vals.max()
+        
+        if len(positive_values) > 0 and (v_max / positive_values.min()) > 10.0:
+            color_norm = plt.cm.colors.LogNorm(vmin=positive_values.min(), vmax=v_max)
+        else:
+            color_norm = plt.cm.colors.Normalize(vmin=v_min, vmax=v_max)
+
+        coll = PolyCollection(struct['polygons'], array=vals, cmap=ab_colormap, norm=color_norm, edgecolors='none')
+        ax.add_collection(coll)
+        
+        sm = plt.cm.ScalarMappable(cmap=ab_colormap, norm=color_norm)
+        sm.set_array(vals)
+        fig.colorbar(sm, ax=ax, label=struct['label'])
+        
+        ax.set_xlabel('Disk Radius R [AU]', fontsize=11)
+        ax.set_ylabel('Grain Size radius $r$ [µm]', fontsize=11)
+        ax.set_title(struct['label'].split('\n')[0].replace(" Midplane", ""), fontsize=12, fontweight='bold')
+
+    # --- GLOBAL AXES FORMATTING (TICK LABELS AND LIMITS) ---
+    reference_sizes = grain_sizes_matrix[0]
+    tick_labels = [f"{size:.2f}" if size < 10 else f"{size:.1f}" for size in reference_sizes]
+
+    for idx in range(num_plots):
+        ax = axes[idx]
+        ax.set_yticks(y_centers)
+        ax.set_yticklabels(tick_labels, fontsize=10)
+        
+        ax.set_xlim(xlim if xlim is not None else (disk_radii.min(), disk_radii.max()))
+        ax.set_ylim(ylim if ylim is not None else (y_edges[0], y_edges[-1]))
+        ax.grid(True, linestyle=":", alpha=0.3)
+        ax.tick_params(labelsize=12)
+
+    for idx in range(num_plots, len(axes)):
+        fig.delaxes(axes[idx])
+
+    try:
+        sample_orig_key = radii_map[disk_radii[0]]
+        time_seconds = main_output_dict[sample_orig_key]['abundances'].coords['time'].values[itime]
+        fig.suptitle(f'Midplane ($z=0$) Dust Grain Properties — $t = {time_seconds/3.156e7:.0f}$ years', fontsize=14, fontweight='bold', y=0.99)
+    except:
+        pass
+
+    plt.tight_layout()
+    plt.show()

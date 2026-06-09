@@ -1468,9 +1468,9 @@ def plot_outputs_nautilus(chempath,
         time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
         
         if num_plots == 1:
-            axes[0].set_title(f"{axes[0].get_title()} \n $t = {time_seconds/3.156e7:.2f}$ years")
+            axes[0].set_title(f"{axes[0].get_title()} \n $t = {time_seconds/3.156e7:.0f}$ years")
         else:
-            fig.suptitle(f'Simulation Output — $t = {time_seconds/3.156e7:.2f}$ years', fontsize=14, y=0.98)
+            fig.suptitle(f'Simulation Output — $t = {time_seconds/3.156e7:.0f}$ years', fontsize=14, y=0.98)
     except:
         pass
 

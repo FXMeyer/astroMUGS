@@ -1806,89 +1806,184 @@ def plot_vertical_cut_nautilus(chempath,
                               species='CO',
                               itime=-1,
                               fracab=True,
-                              col='royalblue',
+                              colormap="turbo",
                               xlim=None,
                               ylim=None,
                               xscale="linear",
-                              yscale="linear"):
+                              yscale="linear",
+                              verbose=True):
     """
-    Plots the vertical profile (abundance vs. height z) for a given species 
-    at a specific disk radius (R) using NAUTILUS simulation outputs.
+    Plots vertical profiles (abundance or physical properties vs. height z) for given species 
+    and disk radii (R) using NAUTILUS simulation outputs.
 
-    Parameters:
-    -----------
-    chempath : str
-        Path to NMGC chemistry outputs
-    main_output_dict : dict
-        Dictionary containing the NAUTILUS simulation outputs (e.g. pipe.chemistry)
-    R : int or float
-        The specific radius (in AU) to extract data for.
-    species : str, optional
-        The chemical species to plot (default is 'CO').
-    itime : int, optional
-        The time index to plot (default is -1, which corresponds to the last timestep).
-    fracab : bool, optional
-        If True, plots fractional abundance relative to H (n_sp/nH). 
-        If False, plots absolute volume density (cm^-3). Default is True.
-    col : str, optional
-        Color of the plot line and markers (default is 'royalblue').
-    xlim, ylim : tuple, optional
-        Limits for the x and y axes (e.g., (min, max)).
-    xscale, yscale : str, optional
-        Scale of the axes (default is "linear").
+    Supports tracing either multiple radii for a single species, or multiple species at a single radius.
+    Cannot accept multi-element lists for both parameters simultaneously.
+
+    Args:
+        chempath (str/Path): Path to parent directory containing radius folders (e.g., "5AU/").
+        main_output_dict (dict): Nested dictionary where keys are radii and values contain simulation data arrays.
+        R (int/float/list): Target radius or list of radii (in AU) to extract data for.
+        species (str/list): Target species formula string or list of species strings to plot.
+        itime (int): Simulation timestep index to visualize. Defaults to -1 (final timestep).
+        fracab (bool): If True, plots fractional abundances. If False, plots absolute number densities (cm^-3).
+        colormap (str): Matplotlib colormap string used to style distinct profile lines. Defaults to "turbo".
+        xlim (tuple): Custom (min, max) boundaries for the horizontal axis.
+        ylim (tuple): Custom (min, max) boundaries for the vertical axis (z [AU]).
+        xscale (str): Matplotlib horizontal axis scale configuration ('linear', 'log'). Defaults to 'linear'.
+        yscale (str): Matplotlib vertical axis scale configuration ('linear', 'log'). Defaults to 'linear'.
+        verbose (bool): If True, prints missing file or size mismatch diagnostics.
+
+    Returns:
+        None: Renders a Matplotlib 1D line plot figure window.
     """
+    
+    chempath = Path(chempath)
 
-    # Check if the requested radius R exists in the provided dictionary keys
-    if R not in list(main_output_dict.keys()):
-        raise ValueError("R does not exist. Please use an existing R that you can find in list(main_output_dict.keys())")
+    # Standardize both inputs to lists for uniform loop processing
+    r_list = [R] if not isinstance(R, list) else R
+    species_list = [species] if not isinstance(species, list) else species
+    r_list = [int(r) for r in r_list]
+
+    # Enforce mutual exclusivity restriction: one parameter must remain isolated as a single item
+    if len(r_list) > 1 and len(species_list) > 1:
+        raise ValueError("Cannot supply multiple values for both 'R' and 'species' simultaneously. One parameter must be a list of length 1.")
+
+    # --- INTERNAL HELPERS ---
+    def title_mol(mol_name, path, verbose):
+        """Formats and returns a LaTeX-compatible string for chemical species titles, including grain environments without units."""
+        m = re.match(r"^([JK])(\d+)", mol_name)
+        env = (
+            f"{'surface' if m.group(1) == 'J' else 'mantle'} at grain size = {get_grain_size_in_um(Path(path)/'1D_grain_sizes.in', m.group(2), verbose=verbose)} µm"
+            if m
+            else "none"
+        )
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        if env != "none": 
+            return f"${f}$ ({env})"
+        else:
+            return f"${f}$"
+
+    def clean_molec(mol_name):
+        """Cleans and isolates LaTeX subscripts/superscripts for the chemical formula without grain environments."""
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        return f"${f}$"
+
+    def get_grain_size_in_um(file_path, bin_index, verbose=False):
+        """Parses 1D_grain_sizes.in to retrieve the grain bin radius mapped to micrometers."""
+        try:
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('!'):
+                        continue
+                    if '!' in line:
+                        line = line.split('!')[0].strip()
+                    values = [float(val) for val in line.split()]
+                    if not values:
+                        continue
+                    num_grains = len(values) // 4
+                    radii_cm = values[:num_grains]
+                    index = int(bin_index) - 1
+                    if 0 <= index < num_grains:
+                        return radii_cm[index] * 10000.0
+            return None
+        except FileNotFoundError:
+            return None
+
+    # --- PLOT INITIALIZATION ---
+    fig, ax = plt.subplots(figsize=(7, 5))
+    
+    # Calculate the total tracing loop length to distribute colors evenly
+    total_plots = max(len(r_list), len(species_list))
+    if total_plots == 1:
+        colors = [plt.get_cmap(colormap)(0.5)]
+    else:
+        colors = plt.get_cmap(colormap)(np.linspace(0, 1, total_plots))
+
+    plot_idx = 0
+    clean_label_ref = ""
+
+    # --- DATA LOOPING EXTRACTION ---
+    for r_val in r_list:
+        if r_val not in main_output_dict:
+            if verbose: print(f"Radius {r_val} AU missing inside main_output_dict. Skipping.")
+            continue
+            
+        for spec_val in species_list:
+            try:
+                # Load the vertical grid (z) from the static 1D file structure
+                static_file = chempath / f"{r_val}AU" / "1D_static.dat"
+                static = pd.read_table(static_file, sep=r'\s+', comment='!', header=None, engine='python')
+                z = static[0].values  # Height z grid coordinates in AU
+                
+                # Isolate targeted species abundance data arrays
+                ab = main_output_dict[r_val]['abundances']
+                sp_arr = ab.isel(time=itime).sel(species=spec_val).values
+                
+                # Derive absolute density or handle raw fractional values depending on parameter flags
+                if not fracab:
+                    nH = main_output_dict[r_val]['H_number_density'][itime, :]
+                    n_plot = nH * sp_arr
+                else:
+                    n_plot = sp_arr
+
+                # Build adaptive label identifiers for the legend mapping block
+                label_mol_text = title_mol(spec_val, chempath / f"{int(r_val)}AU", verbose=verbose)
+                clean_label_ref = clean_molec(spec_val)
+
+                if len(r_list) > 1:
+                    legend_string = f"{label_mol_text} @ {r_val} AU"
+                elif len(species_list) > 1:
+                    legend_string = label_mol_text
+                else:
+                    legend_string = label_mol_text
+
+                # Plot vertical trace profiles
+                ax.scatter(n_plot, z, color=colors[plot_idx], s=25)
+                ax.plot(n_plot, z, color=colors[plot_idx], linestyle='-', linewidth=1.5, label=legend_string)
+                
+                plot_idx += 1
+                
+            except Exception as e:
+                if verbose: print(f"Error parsing vertical profiles for R={r_val} AU, species={spec_val}: {e}")
+
+    if plot_idx == 0:
+        if verbose: print("No profile data successfully traced.")
+        return
+
+    # --- AXIS SCALING AND TITLES ---
+    ax.set_ylabel("z [AU]")
+    
+    # Configure shared horizontal axis labels
+    if len(species_list) == 1 and len(r_list) == 1:
+        ax.set_xlabel(f"{clean_label_ref} — " + ("Fractional Abundance [$n_X/n_H$]" if fracab else "Number Density [$cm^{-3}$]"))
+    else:
+        ax.set_xlabel("Fractional Abundance [$n_X/n_H$]" if fracab else "Number Density [$cm^{-3}$]")
+
+    # Extract simulation step timestamp information
+    try:
+        sample_r = r_list[0]
+        time_seconds = main_output_dict[sample_r]['abundances'].coords['time'].values[itime]
         
-    # Extract the abundance DataArray for the specified radius R
-    ab = main_output_dict[R]['abundances']    # DataArray shape: (nb_timesteps, nb_species, nz)
-    
-    # Select the data for the chosen timestep (itime) and chemical species
-    sp_last = ab.isel(time=itime).sel(species=species)   
-    sp_arr = sp_last.values                 # Convert to numpy array, shape: (nz,)
-    
-    # Determine whether to plot absolute density or fractional abundance
-    if fracab == False:
-        # Get the hydrogen number density for the last physical condition to convert abundance to density
-        nH     = pipe.chemistry[30]['H_number_density'][-1]   # shape: (nz,)
-        n_sp   = nH * sp_arr
-        xlabel = f'n({species}) [cm$^{{-3}}$]'
-    else :
-        # Use fractional abundance directly
-        n_sp = sp_arr
-        xlabel = f'n({species})/n$_H$'
+        if len(r_list) == 1:
+            ax.set_title(f"Vertical Cut Profile @ R = {r_list[0]} AU — $t = {time_seconds/3.156e7:.0f}$ years")
+        else:
+            ax.set_title(f"Multi-Radius Vertical Cut Profile — $t = {time_seconds/3.156e7:.0f}$ years")
+    except:
+        ax.set_title("Vertical Cut Profile")
 
-    # Load the vertical grid (z) from the static 1D structure file for this radius
-    static = pd.read_table(
-        f'{chempath}/{R}AU/1D_static.dat',
-        sep=r'\s+', comment='!', header=None, engine='python'
-    )
-    z = static[0].values   # z coordinate in [AU], ranging from surface to midplane
+    if xlim is not None: ax.set_xlim(xlim)
+    if ylim is not None: ax.set_ylim(ylim)
+    ax.set_xscale(xscale)
+    ax.set_yscale(yscale)
     
-    # Retrieve the physical time in seconds for the selected timestep
-    time_seconds = main_output_dict[R]['abundances'].coords['time'].values[itime]
+    ax.legend(loc='best', frameon=True, shadow=False)
+    ax.grid(True, linestyle=':', alpha=0.5)
     
-    # Initialize the matplotlib figure
-    fig = plt.figure(figsize=(7, 5))
-    
-    # Plot the data using both scatter markers and a continuous line
-    plt.scatter(n_sp, z, color=col)
-    plt.plot(n_sp, z, color=col)
-    
-    # Apply labels, grid, title, limits, and scales
-    plt.xlabel(xlabel)
-    plt.ylabel("z [AU]")
-    plt.grid(True, linestyle=':', alpha=0.5)
-    # Convert time from seconds to years in the title display
-    plt.title(f'$R = {R} $ AU - $t = {time_seconds/3.156e7:.2e}$ yr')
-    plt.xlim(xlim)
-    plt.ylim(ylim)
-    plt.xscale(xscale)
-    plt.yscale(yscale)
-    
-    # Adjust layout and display the plot
     plt.tight_layout()
     plt.show()
 

@@ -2224,6 +2224,7 @@ def plot_atom_ratio_nautilus(chempath,
     plt.show()
 
 
+
 def plot_top_contributing_species(chempath,
                                   main_output_dict,
                                   target_atom="C",
@@ -2259,18 +2260,41 @@ def plot_top_contributing_species(chempath,
     grain_bin : int or str, optional
         Specific grain size category to filter when analyzing surface or mantle ice matrices.
     """
-    
+                                    
     allowed_elements = ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 'Mg', 'Cl', 'P', 'F']
     if target_atom not in allowed_elements:
         raise ValueError(f"Target atom '{target_atom}' is not recognized in the chemical network.")
     
-    # Updated phase validation list to hold 5 phases
     valid_phases = ["gas", "surface", "mantle", "grain", "all"]
     if phase not in valid_phases:
         raise ValueError(f"Phase '{phase}' unrecognized. Choose among {valid_phases}")
     if grain_bin is not None and phase in ["gas","all"] : raise ValueError("grain_bin and gas phase can not be defined simultaneously")
 
+    chempath = Path(chempath)
+
     # --- INTERNAL HELPERS ---
+    def get_grain_size_in_um(file_path, bin_index):
+        """Parses 1D_grain_sizes.in to retrieve the grain bin radius mapped to micrometers."""
+        try:
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('!'):
+                        continue
+                    if '!' in line:
+                        line = line.split('!')[0].strip()
+                    values = [float(val) for val in line.split()]
+                    if not values:
+                        continue
+                    num_grains = len(values) // 4
+                    radii_cm = values[:num_grains]
+                    index = int(bin_index) - 1
+                    if 0 <= index < num_grains:
+                        return radii_cm[index] * 10000.0
+            return None
+        except FileNotFoundError:
+            return None
+
     def parse_species(species_name):
         if species_name == 'e-':
             return "gas", None, "e-"
@@ -2286,7 +2310,6 @@ def plot_top_contributing_species(chempath,
             sp_bin = None
             raw_formula = species_name
         
-        # Remove structural isomer descriptors while keeping trailing charge states intact
         clean_formula = raw_formula.replace('c-', '').replace('l-', '')
         return sp_phase, sp_bin, clean_formula
 
@@ -2297,13 +2320,11 @@ def plot_top_contributing_species(chempath,
         if calc_formula.endswith('+') or calc_formula.endswith('-'):
             calc_formula = calc_formula[:-1]
             
-        # Strip out any remaining internal dashes to avoid messing up structural regex lookups
         calc_formula = calc_formula.replace('-', '')
             
         pattern = re.compile(r'([A-Z][a-z]?)(\d*)') 
         composition = {}
         for atom, n in pattern.findall(calc_formula):
-            # Fallback mechanism to safely capture malformed/unconventional formatting rules
             try:
                 count = int(n) if n else 1
             except ValueError:
@@ -2321,15 +2342,11 @@ def plot_top_contributing_species(chempath,
                 
             sp_phase, sp_bin, clean_formula = parse_species(sp)
             
-            # --- PHASE FILTERING LOGIC ---
-            # "all" passes gas, surface, and mantle environments smoothly
             if phase == "all":
                 pass
-            # "grain" isolates ice layers (both surface and mantle components)
             elif phase == "grain":
                 if sp_phase not in ["surface", "mantle"]:
                     continue
-            # Exact key matching for "gas", "surface", or "mantle"
             elif sp_phase != phase:
                 continue
                 
@@ -2344,11 +2361,17 @@ def plot_top_contributing_species(chempath,
                 
         return valid_list, np.array(coeffs)
 
+    def clean_molec(mol_name):
+        """Cleans and isolates LaTeX subscripts/superscripts for the chemical formula without grain environments."""
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        return f"${f}$"
+
     global_species_contributions = {}
     AU_to_cm = 1.496e13  
 
     # --- 1. RECONSTRUCT RADIAL EDGES FOR VOLUME ---
-    # Maintains the structural link between the extracted integer and the original dictionary keys
     radii_map = {}
     for original_key in main_output_dict.keys():
         digits = re.findall(r'\d+', str(original_key))
@@ -2379,8 +2402,6 @@ def plot_top_contributing_species(chempath,
         if os.path.exists(file_path):
             try:
                 z_points = np.loadtxt(file_path, comments='!', usecols=0)
-                
-                # Retrieve the exact original key mapping (e.g. string vs int representations)
                 orig_key = radii_map[r_value]
                 sub_dict = main_output_dict[orig_key]
                 
@@ -2399,7 +2420,6 @@ def plot_top_contributing_species(chempath,
                 dR = r_right - r_left
                 R_center = float(r_value) * AU_to_cm
                 
-                # Evaluate cylindrical domain shell spatial volume elements: 2 * pi * R * dR * dZ
                 cell_volumes = 2 * np.pi * R_center * dR * (dz * AU_to_cm) 
                 
                 raw_species = list(abundance_array.coords['species'].values)
@@ -2413,9 +2433,7 @@ def plot_top_contributing_species(chempath,
                 nH_2d = nH_profile[np.newaxis, :]     
                 volumes_2d = cell_volumes[np.newaxis, :] 
                 
-                # Scale relative molecular fractional abundance values into raw physical particle pools
                 physical_atoms = y_abundances * nH_2d * volumes_2d
-                total_column_atoms = np.sum(physical_atoms, axis=1)
                 total_column_atoms = np.sum(physical_atoms, axis=1)
                 contributions_per_species = total_column_atoms * target_coeffs
                 
@@ -2442,7 +2460,7 @@ def plot_top_contributing_species(chempath,
     top = sorted_species[:spnumber]
     others_sum = 100.0 - sum(val for sp, val in top)
 
-    labels = [item[0] for item in top]
+    labels = [clean_molec(item[0]) for item in top]
     percentages = [item[1] for item in top]
 
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -2456,9 +2474,15 @@ def plot_top_contributing_species(chempath,
                     textcoords="offset points",
                     ha='center', va='bottom', fontsize=10, fontweight='bold')
 
-    # Handle conditional subtitle parsing across the 5 dynamic phases
+    # Reconstruct localized grain properties if an ice-phase bin value exists
     is_ice_phase = phase in ["surface", "mantle", "grain"]
-    bin_title = f" (Bin {grain_bin})" if (grain_bin and is_ice_phase) else (" (All Grains)" if is_ice_phase else "")
+    if grain_bin and is_ice_phase:
+        first_r = radii[0]
+        size_um = get_grain_size_in_um(chempath / f"{int(first_r)}AU" / "1D_grain_sizes.in", grain_bin)
+        bin_title = f" (Grain Size = {size_um:.1f} µm)" if size_um is not None else f" (Bin {grain_bin})"
+    else:
+        bin_title = " (All Grains)" if is_ice_phase else ""
+        
     phase_title = f"Phase: {phase.upper()}{bin_title}"
 
     ax.set_ylabel(f'Global {phase_title} Budget Contribution (%)', fontsize=11)
@@ -2495,9 +2519,10 @@ def plot_top_species_per_radius(chempath,
     """
     Computes and plots the top N contributing chemical species for a target element
     as a function of disk radius within an optional [rmin, rmax] radial range. 
+
     Displays a horizontal bar chart grouped by radius on the Y-axis, with local budget 
     percentages on the X-axis. Each unique chemical species is mapped to a distinct 
-    color from the chosen colormap.
+    color from the chosen colormap, formatting molecule labels inside LaTeX blocks.
 
     Parameters:
     -----------
@@ -2537,7 +2562,31 @@ def plot_top_species_per_radius(chempath,
         raise ValueError(f"Phase '{phase}' unrecognized. Choose among {valid_phases}")
     if grain_bin is not None and phase in ["gas","all"] : raise ValueError("grain_bin and gas phase can not be defined simultaneously")
 
+    chempath = Path(chempath)
+
     # --- INTERNAL HELPERS ---
+    def get_grain_size_in_um(file_path, bin_index):
+        """Parses 1D_grain_sizes.in to retrieve the grain bin radius mapped to micrometers."""
+        try:
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('!'):
+                        continue
+                    if '!' in line:
+                        line = line.split('!')[0].strip()
+                    values = [float(val) for val in line.split()]
+                    if not values:
+                        continue
+                    num_grains = len(values) // 4
+                    radii_cm = values[:num_grains]
+                    index = int(bin_index) - 1
+                    if 0 <= index < num_grains:
+                        return radii_cm[index] * 10000.0
+            return None
+        except FileNotFoundError:
+            return None
+
     def parse_species(species_name):
         if species_name == 'e-':
             return "gas", None, "e-"
@@ -2603,6 +2652,13 @@ def plot_top_species_per_radius(chempath,
                 valid_list.append(sp)
                 coeffs.append(coef)
         return valid_list, np.array(coeffs)
+
+    def clean_molec(mol_name):
+        """Cleans and isolates LaTeX subscripts/superscripts for the chemical formula without grain environments."""
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        return f"${f}$"
 
     AU_to_cm = 1.496e13  
 
@@ -2738,7 +2794,9 @@ def plot_top_species_per_radius(chempath,
     for r_val in reversed_radii:
         top_entries = radial_plot_data[r_val]
         for species_name, pct_val in reversed(top_entries):
-            y_labels.append(f"{r_val} AU — {species_name}")
+            # Parse species keys inside math/latex formatting text blocks on the horizontal axis labels
+            latex_formula = clean_molec(species_name)
+            y_labels.append(f"{r_val} AU — {latex_formula}")
             x_percentages.append(pct_val)
             bar_colors.append(species_color_mapping[species_name])
             current_index += 1
@@ -2760,8 +2818,15 @@ def plot_top_species_per_radius(chempath,
     for edge in group_edges[:-1]:
         ax.axhline(y=edge - 0.5, color='black', linestyle='-', alpha=0.3, linewidth=1.2)
 
+    # Reconstruct localized grain parameters safely if an ice-phase bin is supplied
     is_ice_phase = phase in ["surface", "mantle", "grain"]
-    bin_title = f" (Bin {grain_bin})" if (grain_bin and is_ice_phase) else (" (All Grains)" if is_ice_phase else "")
+    if grain_bin and is_ice_phase:
+        first_r = radii[0]
+        size_um = get_grain_size_in_um(chempath / f"{int(first_r)}AU" / "1D_grain_sizes.in", grain_bin)
+        bin_title = f" (Grain Size = {size_um:.1f} µm)" if size_um is not None else f" (Bin {grain_bin})"
+    else:
+        bin_title = " (All Grains)" if is_ice_phase else ""
+        
     phase_title = f"Phase: {phase.upper()}{bin_title}"
 
     ax.set_xlabel('Local Radial Budget Contribution (%)', fontsize=12)
@@ -2770,13 +2835,13 @@ def plot_top_species_per_radius(chempath,
     try:
         first_r = radii[0]
         time_seconds = main_output_dict[radii_map[first_r]]['abundances'].coords['time'].values[itime]
-        ax.set_title(f'Top {spnumber} Radial Reservoirs for Element [{target_atom}] — {phase_title}\n$t = {time_seconds/3.156e7:.2e}$ years (Locally Normalized per Shell)', fontsize=13, pad=15)
+        ax.set_title(f'Top {spnumber} Radial Reservoirs for Element [{target_atom}] — {phase_title}\n$t = {time_seconds/3.156e7:.0f}$ years', fontsize=13, pad=15)
     except:
         ax.set_title(f'Top {spnumber} Radial Reservoirs for Element [{target_atom}] — {phase_title}', fontsize=13, pad=15)
         
     # Bounds configuration
     max_pct = max(x_percentages) if x_percentages else 100.0
-    ax.set_xlim(0, min(max_pct * 1.05,100) + 8.0)  
+    ax.set_xlim(0, min(max_pct * 1.05, 100) + 8.0)  
     ax.set_ylim(-0.6, len(y_labels) - 0.4)
     
     ax.grid(axis='x', linestyle='--', alpha=0.4)

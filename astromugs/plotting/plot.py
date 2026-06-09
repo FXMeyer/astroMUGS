@@ -1990,67 +1990,55 @@ def plot_vertical_cut_nautilus(chempath,
 
 def plot_atom_ratio_nautilus(chempath,
                              main_output_dict,
-                             s1="C",
-                             s2="O",
+                             ratio_list=['C/O'],
                              itime=-1,
                              verbose=True,
                              xlim=None,
                              ylim=None,
-                             colormap="gnuplot",
-                             vmin=None,
-                             vmax=None):
-    """Plots a 2D vertical cross-section of the elemental abundance ratio of two atoms.
+                             colormap="gnuplot"):
+    """
+    Plots a 2D vertical cross-section grid of elemental abundance ratios for specified atoms.
 
-    This function builds a non-uniform structured grid (poloidal cut) from discrete 
-    radial column blocks derived from Nautilus physical simulation outputs. It 
-    dynamically parses molecular formulas for all gas-phase species found at each 
-    radius, aggregates the total elemental counts of `s1` and `s2` per grid cell 
-    using an optimized matrix multiplication cache, and renders the calculated 
-    spatial distribution ratio (s1/s2) via a Matplotlib Polygon Collection.
+    Dynamically parses molecular formulas for all gas-phase species across target radii,
+    aggregates elemental abundances using matrix multiplication caching, and sets individual 
+    linear or logarithmic mapping scales automatically based on data spans.
 
     Args:
-        chempath (str): Path to the parent directory containing the radial simulation 
-            folders (e.g., "5AU", "10AU").
-        main_output_dict (dict): Master simulation dictionary where keys are radii 
-            (int/float) and values are sub-dictionaries containing spatial grid and 
-            chemical data properties (e.g., pipe.chemistry).
-        s1 (str, optional): Chemical symbol of the numerator element. Defaults to "C".
-        s2 (str, optional): Chemical symbol of the denominator element. Defaults to "O".
-        itime (int, optional): Index of the simulation timestep to visualize. 
-            Defaults to -1 (the final simulation timestep).
-        verbose (bool, optional): If True, prints diagnostic mismatched configurations, 
-            missing file warnings, or alerts regarding grid cells containing zero `s2` 
-            atoms to the console. Defaults to True.
-        xlim (tuple of float, optional): Custom (min, max) boundaries for the horizontal 
-            Radius axis. Defaults to None (automatically bound to grid geometry).
-        ylim (tuple of float, optional): Custom (min, max) boundaries for the vertical 
-            Altitude axis. Defaults to None (automatically bound to grid geometry).
-        colormap (str, optional): Matplotlib colormap string used to style the discrete 
-            mesh and colorbar scale. Defaults to "gnuplot".
-        vmin (float, optional): Forced lower bound for the colorbar scale. 
-            Defaults to None (computed automatically from the data minimum).
-        vmax (float, optional): Forced upper bound for the colorbar scale. 
-            Defaults to None (computed automatically from the data maximum).
-
-    Raises:
-        ValueError: If either `s1` or `s2` is not present in the allowed elemental 
-            network base array ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 
-            'Mg', 'Cl', 'P', 'F'].
+        chempath (str/Path): Path to parent directory containing radius folders (e.g., "5AU/").
+        main_output_dict (dict): Nested dictionary where keys are radii and values contain simulation data arrays.
+        ratio_list (str/list): Standalone string or list of targeted element division pairs (e.g., ['C/O', 'Mg/Si']).
+        itime (int): Simulation timestep index to visualize. Defaults to -1 (final timestep).
+        verbose (bool): If True, prints missing file, axis size mismatch, or null-denominator cell warnings.
+        xlim (tuple): Custom (min, max) boundaries for the horizontal Radius axis.
+        ylim (tuple): Custom (min, max) boundaries for the vertical Altitude axis.
+        colormap (str): Matplotlib colormap string. Defaults to "gnuplot".
 
     Returns:
-        None: Displays a Matplotlib pyplot figure window.
+        None: Renders a Matplotlib figure window.
     """
+    
+    chempath = Path(chempath)
 
-    
+    # Convert a standalone string into a single-element list to ensure consistent iteration
+    if isinstance(ratio_list, str):
+        ratio_list = [ratio_list]
+
+    # Allowed elemental matrix components validated inside the global configuration network
     elements = ['H', 'He', 'C', 'N', 'O', 'Si', 'S', 'Fe', 'Na', 'Mg', 'Cl', 'P', 'F']
-    if s1 not in elements or s2 not in elements:
-        raise ValueError("Please check your atoms, one of them is not existing in the model")
-        
-    variable_label = f"Atomic Ratio [{s1}/{s2}]"
     
-    # --- INTERNAL HELPER ---
+    # Pre-parse and validate all ratio strings before computing layout grids
+    parsed_ratios = []
+    for item in ratio_list:
+        if '/' not in item:
+            raise ValueError(f"Invalid ratio token entry: '{item}'. It must contain a '/' divider symbol.")
+        s1, s2 = item.split('/')
+        if s1 not in elements or s2 not in elements:
+            raise ValueError(f"Invalid element pair requested in '{item}'. Must belong to: {elements}")
+        parsed_ratios.append((s1, s2, item))
+
+    # --- INTERNAL HELPERS ---
     def count_species_elements(species_name, element1, element2):
-        """Return a dictionary with the counts of element1 and element2 in the given chemical species."""
+        """Extracts elemental quantities matching numerator/denominator targets within chemical formulas."""
         if species_name == 'e-': return {element1: 0, element2: 0}
         formula = species_name.replace('c-', '').replace('l-', '')
         if formula.endswith('+') or formula.endswith('-'):
@@ -2062,17 +2050,18 @@ def plot_atom_ratio_nautilus(chempath,
             composition[atom] = composition.get(atom, 0) + count
         return {
             element1: composition.get(element1, 0),
-            element2: composition.get(element2, 0)}
+            element2: composition.get(element2, 0)
+        }
 
     def keep_gas_species_only(species):
+        """Filters out dust grain surface and mantle populations, keeping gas-phase keys exclusively."""
         motif = re.compile(r'^[JK]\d{2}|^GRAIN')
         return [e for e in species if not motif.match(e)]
 
-    # --- GLOBAL CACHE INITIALIZATION ---
+    # --- RADIAL COLUMN DATABASE ACQUISITION LOOP ---
+    # Store independent extracted column dictionaries mapped per unique ratio string
+    ratio_database = {token: [] for _, _, token in parsed_ratios}
     atom_cache = {}
-
-    # --- EXTRACT DATA BY COLUMN (RADIUS) ---
-    columns_data = []
 
     for r_value in main_output_dict.keys():
         folder_name = f"{r_value}AU"
@@ -2085,146 +2074,154 @@ def plot_atom_ratio_nautilus(chempath,
                 abundance_array = sub_dict['abundances']
                 
                 local_species_list = keep_gas_species_only(list(abundance_array.coords['species'].values))
-                
-                s1_coeffs = []
-                s2_coeffs = []
-                for species in local_species_list:
-                    if species not in atom_cache:
-                        counts = count_species_elements(species, s1, s2)
-                        atom_cache[species] = (counts[s1], counts[s2])
-                    
-                    c1, c2 = atom_cache[species]
-                    s1_coeffs.append(c1)
-                    s2_coeffs.append(c2)
-                
-                s1_coeffs = np.array(s1_coeffs)[:, np.newaxis]
-                s2_coeffs = np.array(s2_coeffs)[:, np.newaxis]
-                
                 sliced_abundances = abundance_array.isel(time=itime).sel(species=local_species_list).values
                 
-                total_s1 = np.sum(sliced_abundances * s1_coeffs, axis=0)
-                total_s2 = np.sum(sliced_abundances * s2_coeffs, axis=0)
-
-                if verbose:
-                    zero_indices = np.where(total_s2 == 0)[0]
-                    if len(zero_indices) > 0:
-                        # Retrieve the corresponding altitudes to make the message useful
-                        altitudes_zero = z_points[zero_indices]
-                        print(f"[R={r_value} AU] No {s2} atoms detected in {len(zero_indices)} vertical grid cell(s).")
-                        print(f"   -> Affected altitudes [AU]: {altitudes_zero}")
-                
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    v_points = np.where(total_s2 > 0, total_s1 / total_s2, 0.0)
-                
-                if len(z_points) == len(v_points):
-                    columns_data.append({
-                        'R': float(r_value),
-                        'z': np.array(z_points),
-                        'v': np.array(v_points)
-                    })
-                elif verbose: 
-                    print(f"Size mismatch for R={r_value}: file has {len(z_points)} points, ratio has {len(v_points)}.")
+                # Loop across every distinct requested ratio combination per disk radius folder
+                for s1, s2, token in parsed_ratios:
+                    s1_coeffs = []
+                    s2_coeffs = []
+                    
+                    for species in local_species_list:
+                        cache_key = f"{species}_{s1}_{s2}"
+                        if cache_key not in atom_cache:
+                            counts = count_species_elements(species, s1, s2)
+                            atom_cache[cache_key] = (counts[s1], counts[s2])
                         
-            except Exception as e:
-                if verbose: 
-                    print(f"Error processing data for R={r_value}: {e}")
-        elif verbose: 
-            print(f"File not found: {file_path}")
-    
-    columns_data = sorted(columns_data, key=lambda x: x['R'])
-    
-    # --- GENERATE THE POLYGON MESH ---
-    polygons = []
-    values = []
-    
-    radii = [col['R'] for col in columns_data]
-    r_edges = []
-    if len(radii) > 1:
-        r_midshifts = 0.5 * np.diff(radii)
-        r_edges.append(radii[0] - r_midshifts[0])
-        for i in range(len(r_midshifts)):
-            r_edges.append(radii[i] + r_midshifts[i])
-        r_edges.append(radii[-1] + r_midshifts[-1])
-    elif len(radii) == 1:
-        r_edges = [radii[0] - 0.5, radii[0] + 0.5]
-    
-    for i, col in enumerate(columns_data):
-        r_left = r_edges[i]
-        r_right = r_edges[i+1]
-        
-        z_pts = col['z']
-        v_pts = col['v']
-        
-        z_edges = []
-        z_midshifts = 0.5 * np.diff(z_pts)
-        z_edges.append(z_pts[0] - z_midshifts[0]) 
-        for j in range(len(z_midshifts)):
-            z_edges.append(z_pts[j] + z_midshifts[j])
-        z_edges.append(max(0.0, z_pts[-1] + z_midshifts[-1])) 
-    
-        for j in range(len(v_pts)):
-            z_top = z_edges[j]
-            z_bottom = z_edges[j+1]
-            
-            poly = [
-                (r_left, z_top),
-                (r_right, z_top),
-                (r_right, z_bottom),
-                (r_left, z_bottom)
-            ]
-            polygons.append(poly)
-            values.append(v_pts[j])
-    
-    # --- PLOTTING ---
-    if not polygons:
-        if verbose: 
-            print("No polygons generated. Check your configuration parameters.")
-    else:
-        fig, ax = plt.subplots(figsize=(10, 6))
-        values = np.array(values)
-        
-        # 1. Determine data bounds (filtering out <= 0 values for logarithmic checks)
-        positive_values = values[values > 0]
-        
-        actual_vmin = vmin if vmin is not None else values.min()
-        actual_vmax = vmax if vmax is not None else values.max()
+                        c1, c2 = atom_cache[cache_key]
+                        s1_coeffs.append(c1)
+                        s2_coeffs.append(c2)
+                    
+                    s1_coeffs = np.array(s1_coeffs)[:, np.newaxis]
+                    s2_coeffs = np.array(s2_coeffs)[:, np.newaxis]
+                    
+                    total_s1 = np.sum(sliced_abundances * s1_coeffs, axis=0)
+                    total_s2 = np.sum(sliced_abundances * s2_coeffs, axis=0)
 
-        # 2. Dynamic normalization selection
-        # Check if positive data exists and if the span exceeds one order of magnitude (factor of 10)
-        if len(positive_values) > 0 and (actual_vmax / positive_values.min()) > 10.0:
-            # Safety check: LogNorm vmin must be strictly greater than 0
-            log_vmin = vmin if vmin is not None else positive_values.min()
-            color_norm = plt.cm.colors.LogNorm(vmin=log_vmin, vmax=actual_vmax)
-            if verbose:
-                print(f"[Plot Scale] Dynamic switch to LOGARITHMIC scale (span > 1 order of magnitude).")
+                    if verbose:
+                        zero_indices = np.where(total_s2 == 0)[0]
+                        if len(zero_indices) > 0:
+                            altitudes_zero = z_points[zero_indices]
+                            print(f"[{token} @ R={r_value} AU] No {s2} denominator atoms found in {len(zero_indices)} cells.")
+                    
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        v_points = np.where(total_s2 > 0, total_s1 / total_s2, 0.0)
+                    
+                    if len(z_points) == len(v_points):
+                        ratio_database[token].append({
+                            'R': float(r_value),
+                            'z': np.array(z_points),
+                            'v': np.array(v_points)
+                        })
+            except Exception as e:
+                if verbose: print(f"Error compiling ratio grids for R={r_value}: {e}")
         else:
-            color_norm = plt.cm.colors.Normalize(vmin=actual_vmin, vmax=actual_vmax)
-            if verbose:
-                print(f"[Plot Scale] Dynamic switch to LINEAR scale (span <= 1 order of magnitude).")
-    
-        # 3. Apply the polygon mesh grid and colorbar
-        coll = PolyCollection(polygons, array=values, cmap=colormap, norm=color_norm, edgecolors='none')
+            if verbose: print(f"File not found: {file_path}")
+
+    # --- CONSTRUCT POLYGON PANELS PER RATIO TARGET ---
+    plot_structures = {}
+
+    for s1, s2, token in parsed_ratios:
+        columns_data = sorted(ratio_database[token], key=lambda x: x['R'])
+        if not columns_data:
+            continue
+            
+        polygons = []
+        values = []
+        radii = [col['R'] for col in columns_data]
+        
+        if len(radii) > 1:
+            r_midshifts = 0.5 * np.diff(radii)
+            r_edges = [radii[0] - r_midshifts[0]] + [radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [radii[-1] + r_midshifts[-1]]
+        else:
+            r_edges = [radii[0] - 0.5, radii[0] + 0.5]
+            
+        for i, col in enumerate(columns_data):
+            r_left, r_right = r_edges[i], r_edges[i+1]
+            z_pts, v_pts = col['z'], col['v']
+            
+            z_midshifts = 0.5 * np.diff(z_pts)
+            z_edges = [z_pts[0] - z_midshifts[0]] + [z_pts[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_pts[-1] + z_midshifts[-1])]
+            
+            for j in range(len(v_pts)):
+                poly = [(r_left, z_edges[j]), (r_right, z_edges[j]), (r_right, z_edges[j+1]), (r_left, z_edges[j+1])]
+                polygons.append(poly)
+                values.append(v_pts[j])
+                
+        plot_structures[token] = {
+            'polygons': polygons,
+            'values': np.array(values),
+            'radii': radii,
+            'all_z': np.concatenate([c['z'] for c in columns_data])
+        }
+
+    if not plot_structures:
+        if verbose: print("No plottable polygon elements successfully generated.")
+        return
+
+    # --- GEOMETRIC SUBPLOT CONFIGURATION PANEL ---
+    num_plots = len(plot_structures)
+    if num_plots == 1:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        axes = [ax]
+    else:
+        cols = min(3, num_plots)
+        rows = (num_plots + cols - 1) // cols
+        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4.5 * rows), squeeze=False,sharex=True,sharey=True)
+        axes = axes.flatten()
+
+    # --- SUBPLOT RENDERING PHASE ---
+    for idx, (_, _, token) in enumerate(parsed_ratios):
+        if token not in plot_structures:
+            continue
+            
+        ax = axes[idx]
+        struct = plot_structures[token]
+        vals = struct['values']
+        
+        # Calculate optimal data bounds independently for each plot canvas
+        positive_values = vals[vals > 0]
+        v_min, v_max = vals.min(), vals.max()
+        
+        # Automatically toggle LogNorm if values span more than one order of magnitude
+        if len(positive_values) > 0 and (v_max / positive_values.min()) > 10.0:
+            color_norm = plt.cm.colors.LogNorm(vmin=positive_values.min(), vmax=v_max)
+        else:
+            color_norm = plt.cm.colors.Normalize(vmin=v_min, vmax=v_max)
+
+        coll = PolyCollection(struct['polygons'], array=vals, cmap=colormap, norm=color_norm, edgecolors='none')
         ax.add_collection(coll)
-    
+        
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=color_norm)
-        sm.set_array(values)
-        fig.colorbar(sm, ax=ax, label=variable_label)
-    
+        sm.set_array(vals)
+        fig.colorbar(sm, ax=ax, label=f"Atomic Ratio [{token}]")
+        
         ax.set_xlabel('Radius R [AU]')
         ax.set_ylabel('Altitude z [AU]')
+        ax.set_title(f"Atomic Ratio: {token}")
         
-        try:
-            first_r = radii[0]
-            time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
-            ax.set_title(f'$t = {time_seconds/3.156e7:.2e}$ years (Ratio {s1}/{s2})')
-        except:
-            ax.set_title(f'Atomic Ratio {s1}/{s2}')
-    
-        all_z = np.concatenate([col['z'] for col in columns_data])
-        ax.set_xlim(xlim if xlim is not None else (0, max(radii) * 1.02))
-        ax.set_ylim(ylim if ylim is not None else (0, max(all_z) * 1.07))
+        ax.set_xlim(xlim if xlim is not None else (0, max(struct['radii']) * 1.02))
+        ax.set_ylim(ylim if ylim is not None else (0, max(struct['all_z']) * 1.07))
+
+    # Remove extra subplot windows if the canvas grid contains empty panels
+    if num_plots > 1:
+        for idx in range(num_plots, len(axes)):
+            fig.delaxes(axes[idx])
+
+    # Extract simulation timestep coordinates to set the main figure title header
+    try:
+        sample_token = list(plot_structures.keys())[0]
+        sample_r = plot_structures[sample_token]['radii'][0]
+        time_seconds = main_output_dict[sample_r]['abundances'].coords['time'].values[itime]
         
-        plt.show()
+        if num_plots == 1:
+            axes[0].set_title(f"{axes[0].get_title()} \n $t = {time_seconds/3.156e7:.0f}$ years")
+        else:
+            fig.suptitle(f'Gas Phase Elemental Ratios — $t = {time_seconds/3.156e7:.0f}$ years', fontsize=14, y=0.98)
+    except:
+        pass
+
+    plt.tight_layout()
+    plt.show()
 
 
 def plot_top_contributing_species(chempath,

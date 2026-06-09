@@ -1212,190 +1212,270 @@ def plot_outputs_nautilus(chempath,
                           main_output_dict,
                           itime=-1,
                           MODE='chemistry',
-                          KEY_NAME='CO',
-                          VARIABLE_LABEL="Fractional Abundance of CO [$n_{X}/n_{H}$]",
+                          key_list=['CO'],
                           fracab=True,
                           verbose=True,
                           xlim=None,
                           ylim=None,
-                          colormap="gnuplot",
+                          colormap="plasma",
                           vmin=None,
-                          vmax=None):
+                          vmax=None,
+                          common_scale=True):
     """
     Plots a 2D vertical cross-section (poloidal cut) of Nautilus simulation outputs.
 
-    This function builds a non-uniform structured grid using discrete column blocks 
-    derived from physical simulation folders. It can plot either standard physical 
-    properties (like gas temperature) or chemical species abundances processed 
-    via xarray.
+    Supports single or multiple keys (physical variables or chemical species) automatically.
+    Displays a single layout or a grid of subplots based on input, with options for independent
+    or globally shared colorbar scaling.
 
     Args:
-        chempath (str): Path to the parent directory containing the "nnAU" folders.
-        main_output_dict (dict): Master dictionary storing the simulation outputs,
-            where keys are radii (int/float) and values are sub-dictionaries (e.g. pipeline.chemistry)
-        itime (int, optional): Index of the simulation timestep to visualize. 
-            Defaults to -1 (the final timestep).
-        MODE (str, optional): Type of variable to plot. Options are 'chemistry' 
-            or 'physical'. Defaults to 'chemistry'.
-        KEY_NAME (str, optional): Dict key name for a 'physical' variable, or the 
-            chemical species formula string for 'chemistry' mode. Defaults to 'CO'.
-        VARIABLE_LABEL (str, optional): Label displayed alongside the colorbar. 
-            Defaults to "Fractional Abundance of CO [$n_{X}/n_{H}$]".
-        fracab (bool, optional): If True, plots raw fractional abundances. If False, 
-            multiplies abundances by the total hydrogen number density (nH) to 
-            show absolute number densities. Defaults to True.
-        verbose (bool, optional): If True, prints diagnostic mismatch or file missing 
-            warnings to the console. Defaults to True.
-        xlim (tuple of float, optional): Custom (min, max) boundaries for the horizontal 
-            Radius axis. Defaults to None (automatically bound to grid).
-        ylim (tuple of float, optional): Custom (min, max) boundaries for the vertical 
-            Altitude axis. Defaults to None (automatically bound to grid).
-        colormap (str, optional): Matplotlib colormap string used to style the discrete 
-            mesh and colorbar scale. Defaults to "gnuplot".
-        vmin (float, optional): Forced lower bound for the colorbar scale. 
-            Defaults to None (computed automatically).
-        vmax (float, optional): Forced upper bound for the colorbar scale. 
-            Defaults to None (computed automatically).
+        chempath (str/Path): Path to parent directory containing radius folders (e.g., "5AU/").
+        main_output_dict (dict): Nested dictionary where keys are radii and values contain simulation data arrays.
+        itime (int): Simulation timestep index to visualize. Defaults to -1 (final timestep).
+        MODE (str): Type of variables to plot ('chemistry' or 'physical'). Defaults to 'chemistry'.
+        key_list (str/list): Single string or list of keys (species formulas or physical variables) to plot.
+        fracab (bool): If True, plots fractional abundances. If False, plots absolute number densities (cm^-3).
+        verbose (bool): If True, prints missing file or size mismatch diagnostics.
+        xlim (tuple): Custom (min, max) boundaries for the Radius axis.
+        ylim (tuple): Custom (min, max) boundaries for the Altitude axis.
+        colormap (str): Matplotlib colormap string. Defaults to "gnuplot".
+        vmin (float): Forced lower bound for colorbars.
+        vmax (float): Forced upper bound for colorbars.
+        common_scale (bool): If True, shares identical colorbar scaling bounds across all subplots.
 
     Returns:
-        None: Displays a Matplotlib pyplot figure window.
+        None: Renders a Matplotlib figure window.
     """
     
-    # --- EXTRACT DATA BY COLUMN (RADIUS) ---
-    columns_data = []
-    folder_pattern = re.compile(r"^([0-9.]+)\s*AU$", re.IGNORECASE)
+    chempath = Path(chempath)
 
-    # Loop directly over your dictionary keys (5, 10, 15, etc.)
+    # Convert a standalone string into a single-element list to ensure consistent iteration
+    if isinstance(key_list, str):
+        key_list = [key_list]
+
+    # --- INTERNAL HELPERS ---
+    def title_mol(mol_name, frac, path, verbose):
+        """Formats and returns a LaTeX-compatible string for chemical species titles, including grain environments."""
+        m = re.match(r"^([JK])(\d+)", mol_name)
+        env = (
+            f"{'surface' if m.group(1) == 'J' else 'mantle'} at grain size = {get_grain_size_in_um(Path(path)/'1D_grain_sizes.in', m.group(2), verbose=verbose)} µm"
+            if m
+            else "none"
+        )
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        if env != "none": 
+            if frac: return f"${f}$ [$n_{{{f}}}/n_H$]\n({env})"
+            else: return f"${f}$ [$n_{{{f}}}$] [cm$^{{-3}}$]\n({env})"
+        else:
+            if frac: return f"${f}$ [$n_{{{f}}}/n_H$]"
+            else: return f"${f}$ [$n_{{{f}}}$] [cm$^{{-3}}$]"
+
+    def title_phys(variable):
+        """Formats physical variable names and appends the appropriate scientific units based on string keywords."""
+        name = variable.replace("_", " ").title()
+        if "temperature" in name.lower(): 
+            name = name + " [K]"
+        elif "extinction" in name.lower(): 
+            name = name + " [mag]"
+        elif "density" in name.lower(): 
+            name = name + " [$cm^{-3}$]"
+        return name
+
+    def get_grain_size_in_um(file_path, bin_index, verbose=False):
+        """Parses 1D_grain_sizes.in to retrieve the grain bin radius mapped to micrometers."""
+        try:
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('!'):
+                        continue
+                    if '!' in line:
+                        line = line.split('!')[0].strip()
+                    values = [float(val) for val in line.split()]
+                    if not values:
+                        continue
+                    num_grains = len(values) // 4
+                    radii_cm = values[:num_grains]
+                    index = int(bin_index) - 1
+                    if 0 <= index < num_grains:
+                        return radii_cm[index] * 10000.0
+            return None
+        except FileNotFoundError:
+            return None
+    
+    # --- EXTRACT DATA BY COLUMN (RADIUS) FOR ALL REQUESTED KEYS ---
+    species_data = {key: [] for key in key_list}
+
     for r_value in main_output_dict.keys():
-        # Construct the exact folder name matching your format (e.g., "5AU", "10AU")
         folder_name = f"{r_value}AU"
-        
-        # Building the path using your 'chempath' parameter
         file_path = os.path.join(chempath, folder_name, "1D_static.dat")
         
         if os.path.exists(file_path):
             try:
-                # 1. Load the z-coordinates for this radius column
-                z_points = np.loadtxt(file_path,comments='!', usecols=0)
+                z_points = np.loadtxt(file_path, comments='!', usecols=0)
                 sub_dict = main_output_dict[r_value]
                 
-                # 2. Extract the 1D physical slice based on your chosen mode
-                if MODE == 'physical':
-                    full_array = sub_dict[KEY_NAME]
-                    v_points = full_array[itime, :].copy() # Use .copy() to preserve the original array
-                elif MODE == 'chemistry':
-                    abundance_array = sub_dict['abundances']
-                    v_points = abundance_array.isel(time=itime).sel(species=KEY_NAME).values.copy()
+                for key in key_list:
+                    if MODE == 'physical':
+                        full_array = sub_dict[key]
+                        v_points = full_array[itime, :].copy()
+                    elif MODE == 'chemistry':
+                        abundance_array = sub_dict['abundances']
+                        v_points = abundance_array.isel(time=itime).sel(species=key).values.copy()
+                        if not fracab:
+                            nH = sub_dict["H_number_density"][itime, :]
+                            v_points = v_points * nH  
                     
-                    if not fracab:
-                        nH = sub_dict["H_number_density"][itime, :]
-                        v_points = v_points * nH  
-                
-                # Store valid columns if lengths match perfectly
-                if len(z_points) == len(v_points):
-                    columns_data.append({
-                        'R': float(r_value),  # Float ensures proper mathematical spacing on the grid
-                        'z': np.array(z_points),
-                        'v': np.array(v_points)
-                    })
-                else:
-                    if verbose: 
-                        print(f"Size mismatch for R={r_value}: file has {len(z_points)} points, dict has {len(v_points)}.")
-                        
+                    # Validate column length alignment before appending
+                    if len(z_points) == len(v_points):
+                        species_data[key].append({
+                            'R': float(r_value),  
+                            'z': np.array(z_points),
+                            'v': np.array(v_points)
+                        })
             except Exception as e:
-                if verbose: 
-                    print(f"Error processing data for R={r_value}: {e}")
+                if verbose: print(f"Error processing {key} for R={r_value}: {e}")
         else:
-            if verbose: 
-                print(f"File not found: {file_path}")
+            if verbose: print(f"File not found: {file_path}")
     
-    # Sort columns by radius for accurate boundary rendering
-    columns_data = sorted(columns_data, key=lambda x: x['R'])
-    
-    # --- GENERATE THE POLYGON MESH ---
-    polygons = []
-    values = []
-    
-    radii = [col['R'] for col in columns_data]
-    r_edges = []
-    if len(radii) > 1:
-        r_midshifts = 0.5 * np.diff(radii)
-        r_edges.append(radii[0] - r_midshifts[0])
-        for i in range(len(r_midshifts)):
-            r_edges.append(radii[i] + r_midshifts[i])
-        r_edges.append(radii[-1] + r_midshifts[-1])
-    elif len(radii) == 1:
-        r_edges = [radii[0] - 0.5, radii[0] + 0.5]
-    
-    for i, col in enumerate(columns_data):
-        r_left = r_edges[i]
-        r_right = r_edges[i+1]
-        
-        z_pts = col['z']
-        v_pts = col['v']
-        
-        z_edges = []
-        z_midshifts = 0.5 * np.diff(z_pts)
-        z_edges.append(z_pts[0] - z_midshifts[0]) 
-        for j in range(len(z_midshifts)):
-            z_edges.append(z_pts[j] + z_midshifts[j])
-        z_edges.append(max(0.0, z_pts[-1] + z_midshifts[-1])) 
-    
-        for j in range(len(v_pts)):
-            z_top = z_edges[j]
-            z_bottom = z_edges[j+1]
-            
-            poly = [
-                (r_left, z_top),
-                (r_right, z_top),
-                (r_right, z_bottom),
-                (r_left, z_bottom)
-            ]
-            polygons.append(poly)
-            values.append(v_pts[j])
-    
-    # --- PLOTTING THE DISCRETE PROFILE ---
-    if not polygons:
-        if verbose: 
-            print("No polygons generated. Check your configuration parameters.")
-    else:
-        fig, ax = plt.subplots(figsize=(10, 6))
-        values = np.array(values)
-        
-        # Détermination des bornes vmin et vmax de l'échelle
-        actual_vmin = vmin if vmin is not None else (max(1e-15, values[values > 0].min() if any(values > 0) else 1e-15) if (MODE == 'chemistry' or "density" in KEY_NAME.lower()) else values.min())
-        actual_vmax = vmax if vmax is not None else values.max()
+    # --- GENERATE THE MESH AND VALUES FOR EACH KEY ---
+    plot_structures = {}
+    all_global_values = [] 
 
-        # Logarithmic scale configurations for density/chemistry maps
-        if MODE == 'chemistry' or "density" or "extinction" in KEY_NAME.lower():
+    for key in key_list:
+        columns_data = sorted(species_data[key], key=lambda x: x['R'])
+        if not columns_data:
+            continue
+            
+        polygons = []
+        values = []
+        radii = [col['R'] for col in columns_data]
+        
+        # Calculate horizontal mesh grid edges
+        if len(radii) > 1:
+            r_midshifts = 0.5 * np.diff(radii)
+            r_edges = [radii[0] - r_midshifts[0]] + [radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [radii[-1] + r_midshifts[-1]]
+        else:
+            r_edges = [radii[0] - 0.5, radii[0] + 0.5]
+            
+        for i, col in enumerate(columns_data):
+            r_left, r_right = r_edges[i], r_edges[i+1]
+            z_pts, v_pts = col['z'], col['v']
+            
+            # Calculate vertical mesh grid edges (assuming z decreases down to midplane)
+            z_midshifts = 0.5 * np.diff(z_pts)
+            z_edges = [z_pts[0] - z_midshifts[0]] + [z_pts[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_pts[-1] + z_midshifts[-1])]
+            
+            for j in range(len(v_pts)):
+                poly = [(r_left, z_edges[j]), (r_right, z_edges[j]), (r_right, z_edges[j+1]), (r_left, z_edges[j+1])]
+                polygons.append(poly)
+                values.append(v_pts[j])
+                
+        vals_array = np.array(values)
+        plot_structures[key] = {'polygons': polygons, 'values': vals_array, 'radii': radii, 'all_z': np.concatenate([c['z'] for c in columns_data])}
+        
+        if common_scale:
+            all_global_values.extend(values)
+
+    if not plot_structures:
+        if verbose: print("No plottable data found.")
+        return
+
+    # --- MANAGEMENT OF SUBPLOT GRID GEOMETRY ---
+    num_plots = len(plot_structures)
+    
+    # Configure canvas architecture dynamically depending on single vs multiple plot targets
+    if num_plots == 1:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        axes = [ax]
+    else:
+        cols = min(3, num_plots)  
+        rows = (num_plots + cols - 1) // cols
+        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4.5 * rows), squeeze=False)
+        axes = axes.flatten() 
+
+    # --- CALCULATION OF THE COMMON SCALE (IF ACTIVE) ---
+    global_vmin, global_vmax = None, None
+    if common_scale and all_global_values and num_plots > 1:
+        all_global_values = np.array(all_global_values)
+        has_density = any("density" in k.lower() for k in key_list)
+        if MODE == 'chemistry' or has_density:
+            pos_vals = all_global_values[all_global_values > 0]
+            global_vmin = vmin if vmin is not None else (max(1e-15, pos_vals.min()) if len(pos_vals) > 0 else 1e-15)
+        else:
+            global_vmin = vmin if vmin is not None else all_global_values.min()
+        global_vmax = vmax if vmax is not None else all_global_values.max()
+
+    # --- SUBPLOTS PLOTTING ---
+    for idx, key in enumerate(key_list):
+        if key not in plot_structures:
+            continue
+            
+        ax = axes[idx]
+        struct = plot_structures[key]
+        vals = struct['values']
+        
+        # Calculate localized norm scaling limits if global synchronization is inactive
+        if common_scale and num_plots > 1:
+            actual_vmin, actual_vmax = global_vmin, global_vmax
+        else:
+            if MODE == 'chemistry' or "density" in key.lower():
+                pos_vals = vals[vals > 0]
+                actual_vmin = vmin if vmin is not None else (max(1e-15, pos_vals.min()) if len(pos_vals) > 0 else 1e-15)
+            else:
+                actual_vmin = vmin if vmin is not None else vals.min()
+            actual_vmax = vmax if vmax is not None else vals.max()
+
+        # Enforce LogNorm for chemical abundances or densities, otherwise standard Normalize
+        if MODE == 'chemistry' or "density" in key.lower() or "extinction" in key.lower():
             color_norm = plt.cm.colors.LogNorm(vmin=actual_vmin, vmax=actual_vmax)
         else:
             color_norm = plt.cm.colors.Normalize(vmin=actual_vmin, vmax=actual_vmax)
-    
-        # FIXED: Changed hardcoded 'inferno' to your 'colormap' parameter so the plot matches the colorbar
-        coll = PolyCollection(polygons, array=values, cmap=colormap, norm=color_norm, edgecolors='none')
+
+        # Draw structured data via non-uniform discrete mesh panels
+        coll = PolyCollection(struct['polygons'], array=vals, cmap=colormap, norm=color_norm, edgecolors='none')
         ax.add_collection(coll)
-    
-        # Setup matching colorbar scale
+        
+        # Format label annotations based on data mode
+        if MODE == 'physical':
+            lab = title_phys(key)
+        elif MODE == 'chemistry':
+            first_r = struct['radii'][0] if struct['radii'] else 5
+            lab = title_mol(key, fracab, chempath / f"{int(first_r)}AU", verbose=verbose)
+            
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=color_norm)
-        sm.set_array(values)
-        fig.colorbar(sm, ax=ax, label=VARIABLE_LABEL)
-    
+        sm.set_array(vals)
+        fig.colorbar(sm, ax=ax, label=lab)
+        
         ax.set_xlabel('Radius R [AU]')
         ax.set_ylabel('Altitude z [AU]')
+        ax.set_title(lab)
         
-        try:
-            first_r = radii[0]
-            time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
-            ax.set_title(f'$t = {time_seconds/3.156e7:.2e}$ years ({KEY_NAME})')
-        except:
-            ax.set_title(f'{KEY_NAME}')
-    
-        all_z = np.concatenate([col['z'] for col in columns_data])
-        ax.set_xlim(xlim if xlim is not None else (0, max(radii) * 1.02))
-        ax.set_ylim(ylim if ylim is not None else (0, max(all_z) * 1.07))
+        ax.set_xlim(xlim if xlim is not None else (0, max(struct['radii']) * 1.02))
+        ax.set_ylim(ylim if ylim is not None else (0, max(struct['all_z']) * 1.07))
+
+    # Remove unneeded empty subplots inside non-perfect grids
+    if num_plots > 1:
+        for idx in range(num_plots, len(axes)):
+            fig.delaxes(axes[idx])
+
+    # Extract simulation timestamp metadata to configure localized headers or suptitle
+    try:
+        any_key = list(plot_structures.keys())[0]
+        first_r = plot_structures[any_key]['radii'][0]
+        time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
         
-        plt.show()
+        if num_plots == 1:
+            axes[0].set_title(f"{axes[0].get_title()} \n $t = {time_seconds/3.156e7:.2f}$ years")
+        else:
+            fig.suptitle(f'Simulation Output — $t = {time_seconds/3.156e7:.2f}$ years', fontsize=14, y=0.98)
+    except:
+        pass
+
+    plt.tight_layout()
+    plt.show()
 
 
 def plot_midplane_nautilus_multi(main_output_dict,

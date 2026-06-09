@@ -10,7 +10,7 @@ short description:  plotting of the disk thermal model
 __________________________________________________________________________________________
 """
 import glob, sys
-
+from pathlib import Path
 import os
 import numpy as np
 import pandas as pd

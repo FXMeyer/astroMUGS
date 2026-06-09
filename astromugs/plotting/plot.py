@@ -1478,65 +1478,121 @@ def plot_outputs_nautilus(chempath,
     plt.show()
 
 
-def plot_midplane_nautilus_multi(main_output_dict,
+def plot_midplane_nautilus_multi(chempath,
+                                 main_output_dict,
                                  itime=-1,
                                  MODE='chemistry',
-                                 KEY_NAMES=['CO'],
-                                 VARIABLE_LABEL="Fractional Abundance [$n_{X}/n_{H}$]",
+                                 key_list=['CO'],
                                  fracab=True,
                                  verbose=True,
                                  xlim=None,
                                  ylim=None,
-                                 cmap_name="turbo",
+                                 colormap="turbo",
                                  vmin=None,
                                  vmax=None):
     """
-    Plots 1D radial profiles of multiple variables/species strictly at the disk midplane (z = 0).
+    Plots 1D radial profiles of multiple variables or chemical species strictly at the disk midplane (z = 0).
+
+    Automatically handles single or multiple keys, generating LaTeX formatted labels and titles 
+    matched with grain-size distribution environments when chemical grain populations are detected.
 
     Args:
-        main_output_dict (dict): Master dictionary storing the simulation outputs,
-            where keys are radii (int/float) and values are sub-dictionaries.
-        itime (int, optional): Index of the simulation timestep to visualize. 
-            Defaults to -1 (the final timestep).
-        MODE (str, optional): Type of variable to plot. Options are 'chemistry' 
-            or 'physical'. Defaults to 'chemistry'.
-        KEY_NAMES (list of str, optional): List of dict keys for 'physical' variables, 
-            or chemical species formula strings for 'chemistry' mode. Defaults to ['CO'].
-        VARIABLE_LABEL (str, optional): Label displayed along the vertical axis. 
-            Defaults to "Fractional Abundance [$n_{X}/n_{H}$]".
-        fracab (bool, optional): If True, plots raw fractional abundances. If False, 
-            multiplies abundances by the total hydrogen number density (nH). Defaults to True.
-        verbose (bool, optional): If True, prints diagnostic processing errors. Defaults to True.
-        xlim (tuple of float, optional): Custom (min, max) boundaries for the Radius axis.
-        ylim (tuple of float, optional): Custom (min, max) boundaries for the vertical axis.
-        cmap_name (str, optional): Matplotlib colormap name used to color the different lines.
-            Defaults to "turbo".
-        vmin (float, optional): Forced lower bound for the vertical scale.
-        vmax (float, optional): Forced upper bound for the vertical scale.
+        chempath (str/Path): Path to parent directory containing radius folders (e.g., "5AU/").
+        main_output_dict (dict): Nested dictionary where keys are radii and values contain simulation data arrays.
+        itime (int): Simulation timestep index to visualize. Defaults to -1 (final timestep).
+        MODE (str): Type of variables to plot ('chemistry' or 'physical'). Defaults to 'chemistry'.
+        key_list (str/list): Single string or list of keys (species formulas or physical variables) to plot.
+        fracab (bool): If True, plots fractional abundances. If False, plots absolute number densities (cm^-3).
+        verbose (bool): If True, prints missing file or size mismatch diagnostics.
+        xlim (tuple): Custom (min, max) boundaries for the Radius axis.
+        ylim (tuple): Custom (min, max) boundaries for the vertical axis.
+        colormap (str): Matplotlib colormap string used to style distinct profile lines. Defaults to "turbo".
+        vmin (float): Forced lower bound for the vertical scale.
+        vmax (float): Forced upper bound for the vertical scale.
 
     Returns:
-        None: Displays a Matplotlib pyplot 1D line figure with multiple curves.
+        None: Renders a Matplotlib 1D line plot figure window.
     """
-    # Force KEY_NAMES to be a list if the user accidentally passes a single string
-    if isinstance(KEY_NAMES, str):
-        KEY_NAMES = [KEY_NAMES]
+    
+    chempath = Path(chempath)
+
+    # Convert a standalone string into a single-element list to ensure consistent iteration
+    if isinstance(key_list, str):
+        key_list = [key_list]
+
+    # --- INTERNAL HELPERS ---
+    def title_mol(mol_name, path, verbose):
+        """Formats and returns a LaTeX-compatible string for chemical species titles, including grain environments without units."""
+        m = re.match(r"^([JK])(\d+)", mol_name)
+        env = (
+            f"{'surface' if m.group(1) == 'J' else 'mantle'} at grain size = {get_grain_size_in_um(Path(path)/'1D_grain_sizes.in', m.group(2), verbose=verbose)} µm"
+            if m
+            else "none"
+        )
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        if env != "none": 
+            return f"${f}$ ({env})"
+        else:
+            return f"${f}$"
+
+    def clean_molec(mol_name):
+        """Cleans and isolates LaTeX subscripts/superscripts for the chemical formula without grain environments."""
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        return f"${f}$"
+
+    def title_phys(variable):
+        """Formats physical variable names and appends the appropriate scientific units based on string keywords."""
+        name = variable.replace("_", " ").title()
+        if "temperature" in name.lower(): 
+            name = name + " [K]"
+        elif "extinction" in name.lower(): 
+            name = name + " [mag]"
+        elif "density" in name.lower(): 
+            name = name + " [$cm^{-3}$]"
+        return name
+
+    def get_grain_size_in_um(file_path, bin_index, verbose=False):
+        """Parses 1D_grain_sizes.in to retrieve the grain bin radius mapped to micrometers."""
+        try:
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('!'):
+                        continue
+                    if '!' in line:
+                        line = line.split('!')[0].strip()
+                    values = [float(val) for val in line.split()]
+                    if not values:
+                        continue
+                    num_grains = len(values) // 4
+                    radii_cm = values[:num_grains]
+                    index = int(bin_index) - 1
+                    if 0 <= index < num_grains:
+                        return radii_cm[index] * 10000.0
+            return None
+        except FileNotFoundError:
+            return None
 
     # --- PLOT INITIALIZATION ---
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Generate colors from the specified colormap
-    # If there is only one species, pick the center of the colormap; otherwise, distribute evenly
-    if len(KEY_NAMES) == 1:
-        colors = [plt.get_cmap(cmap_name)(0.5)]
+    # Map out line colors uniformly across the chosen colormap scale
+    if len(key_list) == 1:
+        colors = [plt.get_cmap(colormap)(0.5)]
     else:
-        colors = plt.get_cmap(cmap_name)(np.linspace(0, 1, len(KEY_NAMES)))
+        colors = plt.get_cmap(colormap)(np.linspace(0, 1, len(key_list)))
 
-    # Track valid min and max values across all species to handle log-scale limits correctly
+    # Track valid boundaries across profiles to secure log scale ranges safely
     all_valid_mins = []
     all_valid_maxs = []
+    legend_labels = {}
 
-    # --- LOOP OVER EACH SPECIES / VARIABLE ---
-    for idx, key in enumerate(KEY_NAMES):
+    # --- DATA EXTRACTION LOOP ---
+    for idx, key in enumerate(key_list):
         radii_list = []
         values_list = []
 
@@ -1544,10 +1600,9 @@ def plot_midplane_nautilus_multi(main_output_dict,
             try:
                 sub_dict = main_output_dict[r_value]
                 
-                # CRITICAL: In Nautilus 1D grid arrays, index -1 represents the midplane (z = 0)
+                # In Nautilus 1D outputs, index -1 strictly isolates the midplane (z = 0)
                 MIDPLANE_INDEX = -1 
                 
-                # Extract the single value at the midplane
                 if MODE == 'physical':
                     full_array = sub_dict[key]
                     v_midplane = full_array[itime, MIDPLANE_INDEX]
@@ -1567,32 +1622,46 @@ def plot_midplane_nautilus_multi(main_output_dict,
                     print(f"Error processing midplane data for R={r_value}, Key={key}: {e}")
 
         if not radii_list:
-            if verbose:
-                print(f"No data collected for Key: {key}. Skipping.")
+            if verbose: print(f"No valid data collected for Key: {key}. Skipping.")
             continue
 
-        # Sort arrays by radius to ensure the plotted line connects points sequentially
+        # Sort values chronologically along the radial grid axis
         sort_indices = np.argsort(radii_list)
         radii_arr = np.array(radii_list)[sort_indices]
         values_arr = np.array(values_list)[sort_indices]
 
-        # Store min/max values for automatic Y-axis scaling
+        # Gather active range spectrum metadata
         pos_values = values_arr[values_arr > 0]
         if len(pos_values) > 0:
             all_valid_mins.append(pos_values.min())
         all_valid_maxs.append(values_arr.max())
 
-        # Plot line and marker dots for the current species
-        ax.plot(radii_arr, values_arr, color=colors[idx], linestyle='-', marker='o', 
-                markersize=5, linewidth=1.5, label=key)
+        # Generate proper label syntax based on current runtime MODE properties
+        if MODE == 'physical':
+            label_text = title_phys(key)
+        elif MODE == 'chemistry':
+            first_r = radii_list[0] if radii_list else 5
+            label_text = title_mol(key, chempath / f"{int(first_r)}AU", verbose=verbose)
+        
+        # Save reference clean name labels to determine axis layout blocks
+        if MODE == "chemistry": 
+            legend_labels[key] = clean_molec(key)
+        else: 
+            legend_labels[key] = label_text
 
-    # --- SCALE AND AXIS LIMIT MANAGEMENT ---
-    # Determine whether to use a logarithmic vertical axis
-    is_log = MODE == 'chemistry' or any("density" in k.lower() or "extinction" in k.lower() for k in KEY_NAMES)
+        # Render profile line trace
+        ax.plot(radii_arr, values_arr, color=colors[idx], linestyle='-', marker='o', 
+                markersize=5, linewidth=1.5, label=label_text)
+
+    if not legend_labels:
+        if verbose: print("No plottable profiles successfully mapped.")
+        return
+
+    # --- SCALE AND BOUNDARY CONTROLS ---
+    is_log = MODE == 'chemistry' or any("density" in k.lower() or "extinction" in k.lower() for k in key_list)
     
     if is_log:
         ax.set_yscale('log')
-        # Fallback value checking to prevent log(0) crash loops across all curves
         global_min = min(all_valid_mins) if all_valid_mins else 1e-15
         global_max = max(all_valid_maxs) if all_valid_maxs else 1.0
         
@@ -1603,26 +1672,35 @@ def plot_midplane_nautilus_multi(main_output_dict,
         if vmin is not None or vmax is not None:
             ax.set_ylim(vmin, vmax)
 
-    # --- LABELS AND TITLE CONFIGURATION ---
+    # --- AXIS LABELING AND HEADERS ---
     ax.set_xlabel('Radius R [AU]')
-    ax.set_ylabel(VARIABLE_LABEL)
     
-    # Attempt to read and parse the time coordinate in years
-    try:
-        first_r = list(main_output_dict.keys())[0]
-        time_seconds = main_output_dict[first_r]['abundances'].coords['time'].values[itime]
-        ax.set_title(f'Midplane ($z = 0$) Profile at $t = {time_seconds/3.156e7:.2e}$ years')
-    except:
-        ax.set_title('Midplane ($z = 0$) Profile')
+    # Deduce generic global Y-axis title depending on single vs combined lines
+    if len(key_list) == 1:
+        if MODE == 'chemistry':
+            ax.set_ylabel(f"{list(legend_labels.values())[0]} — " + ("Fractional Abundance [$n_X/n_H$]" if fracab else "Number Density [$cm^{-3}$]"))
+        else:
+            ax.set_ylabel(list(legend_labels.values())[0])
+    else:
+        if MODE == 'chemistry':
+            ax.set_ylabel("Fractional Abundance [$n_X/n_H$]" if fracab else "Number Density [$cm^{-3}$]")
+        else:
+            ax.set_ylabel("Physical Values (See Legend)")
 
-    # Apply manual axis overrides if supplied
+    # Read simulation timestep value coordinates in years
+    try:
+        any_r = list(main_output_dict.keys())[0]
+        time_seconds = main_output_dict[any_r]['abundances'].coords['time'].values[itime]
+        ax.set_title(f'Midplane ($z = 0$) Radial Profile — $t = {time_seconds/3.156e7:.0f}$ years')
+    except:
+        ax.set_title('Midplane ($z = 0$) Radial Profile')
+
     if xlim is not None: ax.set_xlim(xlim)
     if ylim is not None: ax.set_ylim(ylim)
 
-    # Add legend to identify the plotted species
     ax.legend(loc='best', frameon=True, shadow=False)
-    
     ax.grid(True, linestyle=':', alpha=0.5)
+    
     plt.tight_layout()
     plt.show()
 

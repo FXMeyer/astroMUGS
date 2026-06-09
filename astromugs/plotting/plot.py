@@ -3555,7 +3555,7 @@ def plot_ratio_midplane_gas_vs_grain(chempath,
     try:
         first_key = radii_map[sorted_radii_ints[0]]
         time_seconds = main_output_dict[first_key]['abundances'].coords['time'].values[itime]
-        ax.set_title(f'Atomic Ratio {s1}/{s2} at Midplane ($z=0$) — $t = {time_seconds/3.156e7:.2e}$ yr', fontsize=12, pad=12)
+        ax.set_title(f'Atomic Ratio {s1}/{s2} at Midplane ($z=0$) — $t = {time_seconds/3.156e7:.0f}$ yr', fontsize=12, pad=12)
     except:
         ax.set_title(f'Atomic Ratio {s1}/{s2} at Midplane ($z=0$)', fontsize=12, pad=12)
 

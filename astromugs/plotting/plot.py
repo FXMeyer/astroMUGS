@@ -3111,6 +3111,7 @@ def plot_top_species_per_radius(chempath,
 #     plt.show()
 
 
+
 def plot_species_evolution_with_grain_size(chempath,
                                            main_output_dict,
                                            target_radius,
@@ -3120,7 +3121,10 @@ def plot_species_evolution_with_grain_size(chempath,
                                            cmap_name="tab10"):
     """
     Computes and plots the evolution of the globally dominant ice chemical species 
-    (Surface + Mantle combined) as a function of grain size at a specific disk radius.
+    (Surface + Mantle combined) as a function of grain size at one or multiple disk radii.
+
+    Generates a standalone clean canvas for a unique radius input, or structures a dynamic 
+    grid configuration matrix of subplots when a multi-element list of radii is supplied.
 
     Parameters:
     -----------
@@ -3128,8 +3132,8 @@ def plot_species_evolution_with_grain_size(chempath,
         Path to the directory containing spatial grid subfolders (e.g., '10AU/', '100AU/').
     main_output_dict : dict
         Nested dictionary mapping radial keys to data sub-structures.
-    target_radius : int or float
-        The specific radius (in AU) at which the grain size analysis is performed.
+    target_radius : int, float or list
+        The specific radius or list of radii (in AU) at which the grain size analysis is performed.
     itime : int, default -1
         Time index to slice from the multi-epoch data arrays.
     verbose : bool, default True
@@ -3140,7 +3144,35 @@ def plot_species_evolution_with_grain_size(chempath,
         Name of the Matplotlib colormap used to dynamically assign unique colors to species.
     """
 
+    chempath = Path(chempath)
+
+    # Standardize input into a list format to guarantee consistent loop iterations
+    radii_list = [target_radius] if not isinstance(target_radius, list) else target_radius
+    radii_list = [int(r) for r in radii_list]
+
     # --- INTERNAL HELPERS ---
+    def get_grain_size_in_um(file_path, bin_index):
+        """Parses 1D_grain_sizes.in to retrieve the grain bin radius mapped to micrometers."""
+        try:
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('!'):
+                        continue
+                    if '!' in line:
+                        line = line.split('!')[0].strip()
+                    values = [float(val) for val in line.split()]
+                    if not values:
+                        continue
+                    num_grains = len(values) // 4
+                    radii_cm = values[:num_grains]
+                    index = int(bin_index) - 1
+                    if 0 <= index < num_grains:
+                        return radii_cm[index] * 10000.0
+            return None
+        except FileNotFoundError:
+            return None
+
     def parse_species(species_name):
         if species_name == 'e-':
             return "gas", None, "e-"
@@ -3148,7 +3180,6 @@ def plot_species_evolution_with_grain_size(chempath,
         if grain_match:
             p_code, g_bin, raw_formula = grain_match.groups()
             sp_phase = "surface" if p_code == 'J' else "mantle"
-            # Keep the raw bin identifier name string (e.g. '01', '1', 'fine'...)
             sp_bin = g_bin 
         else:
             sp_phase = "gas"
@@ -3157,9 +3188,16 @@ def plot_species_evolution_with_grain_size(chempath,
         clean_formula = raw_formula.replace('c-', '').replace('l-', '')
         return sp_phase, sp_bin, clean_formula
 
+    def clean_molec(mol_name):
+        """Cleans and isolates LaTeX subscripts/superscripts for the chemical formula without grain environments."""
+        raw = re.sub(r"^[JK]\d+", "", mol_name)
+        f = re.sub(r"(\d+)", r"_{\1}", raw)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        return f"${f}$"
+
     AU_to_cm = 1.496e13  
 
-    # --- 1. FIND THE TARGET RADIUS DATA ---
+    # Reconstruct the global map indexing original keys to digits
     radii_map = {}
     for original_key in main_output_dict.keys():
         digits = re.findall(r'\d+', str(original_key))
@@ -3169,161 +3207,206 @@ def plot_species_evolution_with_grain_size(chempath,
             except ValueError:
                 continue
                 
-    if int(target_radius) not in radii_map:
-        if verbose: print(f"Radius {target_radius} AU not found in main_output_dict.")
-        return
-        
-    orig_key = radii_map[int(target_radius)]
-    sub_dict = main_output_dict[orig_key]
-    abundance_array = sub_dict['abundances']
-    nH_profile = sub_dict["H_number_density"][itime,:]
-    raw_species_list = list(abundance_array.coords['species'].values)
-
-    # --- 2. LOAD PHYSICAL SPATIAL VOLUMES FOR THIS RADIUS ---
     sorted_all_radii = sorted(list(radii_map.keys()))
-    r_idx = sorted_all_radii.index(int(target_radius))
-    if len(sorted_all_radii) > 1:
-        r_midshifts = 0.5 * np.diff(sorted_all_radii)
-        r_edges = [sorted_all_radii[0] - r_midshifts[0]] + [sorted_all_radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [sorted_all_radii[-1] + r_midshifts[-1]]
-    else:
-        r_edges = [sorted_all_radii[0] * 0.9, sorted_all_radii[0] * 1.1]
 
-    file_path = os.path.join(chempath, f"{int(target_radius)}AU", "1D_static.dat")
-    if not os.path.exists(file_path):
-        if verbose: print(f"File not found: {file_path}")
-        return
-        
-    z_points = np.loadtxt(file_path, comments='!', usecols=0)
-    if len(z_points) > 1:
-        z_midshifts = 0.5 * np.diff(z_points)
-        z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
-        dz = np.abs(np.diff(z_edges))
-    else:
-        dz = np.array([z_points[0] if z_points[0] > 0 else 1.0])
+    # Pre-gather valid plot data per radius to determine total canvas needs
+    plot_structures = {}
+    all_encountered_species = set()
 
-    r_left = r_edges[r_idx] * AU_to_cm
-    r_right = r_edges[r_idx+1] * AU_to_cm
-    cell_volumes = 2 * np.pi * (float(target_radius) * AU_to_cm) * (r_right - r_left) * (dz * AU_to_cm)
-    
-    nH_2d = nH_profile[np.newaxis, :]
-    volumes_2d = cell_volumes[np.newaxis, :]
-
-    # --- 3. HARVEST AND CACHE ALL VALID DUST BINS AND METALISTS ---
-    available_bins_set = set()
-    species_metadata = {} 
-
-    for sp in raw_species_list:
-        if "GRAIN" in sp:
+    for r_val in radii_list:
+        if r_val not in radii_map:
+            if verbose: print(f"Radius {r_val} AU not found in main_output_dict. Skipping.")
             continue
-        sp_phase, sp_bin, clean_formula = parse_species(sp)
-        # Isolate only ice matrices (surface + mantle components)
-        if sp_phase in ["surface", "mantle"] and sp_bin is not None:
-            available_bins_set.add(sp_bin)
-            species_metadata[sp] = (sp_phase, sp_bin, clean_formula)
+            
+        orig_key = radii_map[r_val]
+        sub_dict = main_output_dict[orig_key]
+        abundance_array = sub_dict['abundances']
+        nH_profile = sub_dict["H_number_density"][itime,:]
+        raw_species_list = list(abundance_array.coords['species'].values)
 
-    # Convert to sorted list to keep stable X tracking indexes. 
-    # Tries integer sort fallback if labels are numbers as strings.
-    try:
-        sorted_bins = sorted(list(available_bins_set), key=lambda x: int(x))
-    except ValueError:
-        sorted_bins = sorted(list(available_bins_set))
+        # Volume integration setup
+        r_idx = sorted_all_radii.index(r_val)
+        if len(sorted_all_radii) > 1:
+            r_midshifts = 0.5 * np.diff(sorted_all_radii)
+            r_edges = [sorted_all_radii[0] - r_midshifts[0]] + [sorted_all_radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [sorted_all_radii[-1] + r_midshifts[-1]]
+        else:
+            r_edges = [r_val * 0.9, r_val * 1.1]
 
-    if not sorted_bins:
-        print(f"No ice-coated dust grain bins detected at R={target_radius} AU.")
-        return
-
-    # Intermediate storage dictionaries
-    bin_raw_data = {b: {} for b in sorted_bins}
-    global_species_scores = {} 
-
-    # --- 4. DATA ACCUMULATION PER DUST SIZE CLASS ---
-    for sp in raw_species_list:
-        if sp not in species_metadata:
+        file_path = os.path.join(chempath, f"{r_val}AU", "1D_static.dat")
+        if not os.path.exists(file_path):
+            if verbose: print(f"File not found: {file_path}. Skipping radius.")
             continue
-        sp_phase, sp_bin, clean_formula = species_metadata[sp]
+            
+        z_points = np.loadtxt(file_path, comments='!', usecols=0)
+        if len(z_points) > 1:
+            z_midshifts = 0.5 * np.diff(z_points)
+            z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
+            dz = np.abs(np.diff(z_edges))
+        else:
+            dz = np.array([z_points[0] if z_points[0] > 0 else 1.0])
 
-        # Extract 1D altitude profile array, compute cumulative volume physical mass particles
-        y_values = abundance_array.isel(time=itime).sel(species=sp).values
-        absolute_particles = np.sum(y_values * nH_2d * volumes_2d)
+        r_left = r_edges[r_idx] * AU_to_cm
+        r_right = r_edges[r_idx+1] * AU_to_cm
+        cell_volumes = 2 * np.pi * (float(r_val) * AU_to_cm) * (r_right - r_left) * (dz * AU_to_cm)
         
-        if absolute_particles > 0:
-            # Combine surface + mantle counts for this clean molecule entry inside its respective size bin
-            bin_raw_data[sp_bin][clean_formula] = bin_raw_data[sp_bin].get(clean_formula, 0.0) + absolute_particles
-            # Track absolute overall molecule abundance across all sizes to determine global dominance ranking
-            global_species_scores[clean_formula] = global_species_scores.get(clean_formula, 0.0) + absolute_particles
+        nH_2d = nH_profile[np.newaxis, :]
+        volumes_2d = cell_volumes[np.newaxis, :]
 
-    if not global_species_scores:
-        print(f"No ice molecules detected on dust grains at R={target_radius} AU.")
+        # Harvest available categories
+        available_bins_set = set()
+        species_metadata = {} 
+
+        for sp in raw_species_list:
+            if "GRAIN" in sp: continue
+            sp_phase, sp_bin, clean_formula = parse_species(sp)
+            if sp_phase in ["surface", "mantle"] and sp_bin is not None:
+                available_bins_set.add(sp_bin)
+                species_metadata[sp] = (sp_phase, sp_bin, clean_formula)
+
+        try:
+            sorted_bins = sorted(list(available_bins_set), key=lambda x: int(x))
+        except ValueError:
+            sorted_bins = sorted(list(available_bins_set))
+
+        if not sorted_bins:
+            continue
+
+        bin_raw_data = {b: {} for b in sorted_bins}
+        local_species_scores = {}
+
+        for sp in raw_species_list:
+            if sp not in species_metadata: continue
+            _, sp_bin, clean_formula = species_metadata[sp]
+
+            y_values = abundance_array.isel(time=itime).sel(species=sp).values
+            absolute_particles = np.sum(y_values * nH_2d * volumes_2d)
+            
+            if absolute_particles > 0:
+                bin_raw_data[sp_bin][clean_formula] = bin_raw_data[sp_bin].get(clean_formula, 0.0) + absolute_particles
+                local_species_scores[clean_formula] = local_species_scores.get(clean_formula, 0.0) + absolute_particles
+
+        if not local_species_scores:
+            continue
+
+        # Extract locally normalized parameters
+        sorted_local = sorted(local_species_scores.items(), key=lambda x: x[1], reverse=True)
+        top_local_species = [item[0] for item in sorted_local[:spnumber]]
+        
+        for sp in top_local_species:
+            all_encountered_species.add(sp)
+
+        plot_structures[r_val] = {
+            'bin_raw_data': bin_raw_data,
+            'sorted_bins': sorted_bins,
+            'top_species': top_local_species,
+            'abundance_array': abundance_array
+        }
+
+    if not plot_structures:
+        if verbose: print("No valid data compiled across requested radius list keys.")
         return
 
-    # Extract Top N globally significant molecules tracking
-    sorted_global_species = sorted(global_species_scores.items(), key=lambda x: x[1], reverse=True)
-    top_global_species = [item[0] for item in sorted_global_species[:spnumber]]
+    # --- GEOMETRIC SUBPLOT CONFIGURATION PANEL ---
+    num_plots = len(plot_structures)
+    if num_plots == 1:
+        fig, ax = plt.subplots(figsize=(11, 6))
+        axes = [ax]
+    else:
+        cols = min(3, num_plots)
+        rows = (num_plots + cols - 1) // cols
+        fig, axes = plt.subplots(rows, cols, figsize=(5.5 * cols, 5.5 * rows), squeeze=False,sharey=True)
+        axes = axes.flatten()
 
-    # --- 5. GRAPH CONSTRUCTION ---
-    fig, ax = plt.subplots(figsize=(11, 6))
+    # --- STABLE SYSTEMWIDE COLORMAPPING ---
+    unique_species_list = sorted(list(all_encountered_species))
+    num_unique_species = len(unique_species_list)
     
     try:
         cmap = plt.get_cmap(cmap_name)
     except ValueError:
-        if verbose: print(f"Colormap '{cmap_name}' not found. Falling back to default 'tab10'.")
         cmap = plt.get_cmap("tab10")
         
-    species_colors = {sp: cmap(idx / max(1, spnumber - 1)) for idx, sp in enumerate(top_global_species)}
+    if hasattr(cmap, 'colors') and len(cmap.colors) >= num_unique_species:
+        species_colors = {sp: cmap(idx) for idx, sp in enumerate(unique_species_list)}
+    else:
+        color_indices = np.linspace(0, 1, num_unique_species) if num_unique_species > 1 else [0.0]
+        species_colors = {sp: cmap(color_indices[idx]) for idx, sp in enumerate(unique_species_list)}
 
-    plot_percentages = {sp: [] for sp in top_global_species}
-    x_positions = np.arange(len(sorted_bins))
-    # Read the explicit folder/bin string names directly for the X axis labels
-    x_ticks_labels = [f"Bin {b}" for b in sorted_bins]
+    # --- PLOTTING PHASE ---
+    for idx, r_val in enumerate(radii_list):
+        if r_val not in plot_structures:
+            continue
+            
+        ax = axes[idx]
+        struct = plot_structures[r_val]
+        bin_raw = struct['bin_raw_data']
+        sbins = struct['sorted_bins']
+        local_top = struct['top_species']
+        
+        x_positions = np.arange(len(sbins))
+        
+        # Load physical grain categories in micrometers explicitly
+        grain_sizes_um = []
+        grain_sizes_file = chempath / f"{r_val}AU" / "1D_grain_sizes.in"
+        for b in sbins:
+            size_um = get_grain_size_in_um(grain_sizes_file, b)
+            grain_sizes_um.append(f"{size_um:.1f}" if size_um is not None else f"Bin {b}")
 
-    for b in sorted_bins:
-        total_bin_ice_budget = sum(bin_raw_data[b].values())
-        for sp in top_global_species:
-            if total_bin_ice_budget > 0:
-                # Fraction contribution normalized per specific dust bin size shell
-                pct = (bin_raw_data[b].get(sp, 0.0) / total_bin_ice_budget) * 100
-                plot_percentages[sp].append(pct)
-            else:
-                plot_percentages[sp].append(0.0)
+        # Compute data vectors
+        plot_percentages = {sp: [] for sp in local_top}
+        for b in sbins:
+            total_bin_budget = sum(bin_raw[b].values())
+            for sp in local_top:
+                if total_bin_budget > 0:
+                    pct = (bin_raw[b].get(sp, 0.0) / total_bin_budget) * 100
+                    plot_percentages[sp].append(pct)
+                else:
+                    plot_percentages[sp].append(0.0)
 
-    # Plot lines tracking profiles
-    for sp in top_global_species:
-        ax.plot(x_positions, plot_percentages[sp], 
-                label=sp, 
-                color=species_colors[sp], 
-                linewidth=2.5, 
-                marker='o', 
-                markersize=6)
+        # Plot structural traces
+        for sp in local_top:
+            latex_label = clean_molec(sp)
+            ax.plot(x_positions, plot_percentages[sp], 
+                    label=latex_label, 
+                    color=species_colors[sp], 
+                    linewidth=2.0, 
+                    marker='o', 
+                    markersize=5)
 
-    # Format frame axis and labels
-    ax.set_xlabel('Grain Bins', fontsize=12)
-    ax.set_ylabel('Ice Mantle + Surface Molecule Budget Contribution (%)', fontsize=12)
-    
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(x_ticks_labels, fontsize=10, fontweight='bold')
-    
-    ax.set_ylim(-2, 105)
-    ax.grid(True, linestyle="--", alpha=0.4)
-    ax.legend(title="Top Global Ice Species", title_fontsize='11', loc='upper right',ncol=2)
-    
+        ax.set_xlabel('Grain Radius [µm]', fontsize=15)
+        ax.set_ylabel('Contribution (%)', fontsize=15)
+        ax.set_title(f"Radius: {r_val} AU", fontsize=15, fontweight='bold')
+        
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(grain_sizes_um, fontsize=9, rotation=70)
+        
+        ax.set_ylim(-2, 105)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(loc='upper right', ncol=spnumber//2, fontsize=12)
+
+        ax.tick_params(labelsize=14)
+
+    # Clean superfluous canvas windows if any exist
+    if num_plots > 1:
+        for idx in range(num_plots, len(axes)):
+            fig.delaxes(axes[idx])
+
+    # Reconstruct timeline labels to attach inside the global canvas suptitle block
     try:
-        time_seconds = abundance_array.coords['time'].values[itime]
-        ax.set_title(f'Top {spnumber} Ice Species (Surface + Mantle) vs Grain Size\n$R = {target_radius}$ AU — $t = {time_seconds/3.156e7:.2e}$ years (Locally Normalized)', fontsize=12, fontweight='bold', pad=12)
+        sample_r = list(plot_structures.keys())[0]
+        sample_arr = plot_structures[sample_r]['abundance_array']
+        time_seconds = sample_arr.coords['time'].values[itime]
+        
+        if num_plots == 1:
+            axes[0].set_title(f"{axes[0].get_title()} \n $t = {time_seconds/3.156e7:.0f}$ years")
+        else:
+            fig.suptitle(f'Top {spnumber} Ice Carriers vs Grain Size Distribution — $t = {time_seconds/3.156e7:.0f}$ years', fontsize=20, y=0.99)
     except:
-        ax.set_title(f'Top {spnumber} Ice Species (Surface + Mantle) vs Grain Size\n$R = {target_radius}$ AU', fontsize=12, fontweight='bold', pad=12)
+        pass
 
     plt.tight_layout()
     plt.show()
 
-import os
-import re
-import numpy as np
-import matplotlib.pyplot as plt
-
-import os
-import re
-import numpy as np
-import matplotlib.pyplot as plt
 
 def plot_ratio_midplane_gas_vs_grain(chempath,
                                     main_output_dict,
@@ -3457,7 +3540,8 @@ def plot_ratio_midplane_gas_vs_grain(chempath,
     fig, ax = plt.subplots(figsize=(9, 5))
     
     # Apply a logarithmic scale to account for sharp chemical variations
-    ax.set_yscale('log')
+    if max(np.max(gas_arr),np.max(grain_arr))/main(np.min(gas_arr),np.min(grain_arr)) > 10 : ax.set_yscale('log')
+    else: ax.set_yscale('linear')
     
     # Render line tracks + markers for each discrete phase
     ax.plot(radii_arr, gas_arr, color="teal", linestyle='-', marker='o', label='Gas', linewidth=1.8)

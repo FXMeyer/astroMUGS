@@ -3841,3 +3841,275 @@ def plot_grain_properties_midplane(chempath,
 
     plt.tight_layout()
     plt.show()
+
+
+import os
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+from scipy.interpolate import griddata
+
+def plot_gas_fraction_map(chempath,
+                          main_output_dict,
+                          molecule="CO",
+                          itime=-1,
+                          threshold=50.0,
+                          overlay_color='black',
+                          verbose=True,
+                          xlim=None,
+                          ylim=None,
+                          rmin=None,
+                          rmax=None,
+                          colormap="RdYlBu_r"):
+    """
+    Plots a smoothly interpolated 2D vertical cross-section map (R vs z) of the 
+    gas-phase fraction of a chemical species relative to its total volumetric 
+    budget (Gas + Surface J + Mantle K) at a specific simulation timestep.
+
+    The local percentage is calculated using absolute particle counts integrated 
+    over the cylindrical shell volume element (V = 2 * pi * R * dR * dz).
+    An overlay is superimposed based on the `threshold` parameter format:
+    - Scalar (float/int): Draws a solid line at that exact gas-phase percentage.
+    - Sequence (list/tuple of 2 values): Regions a hatched transition zone.
+
+    Parameters:
+        chempath (str/Path): Path to the directory containing radial subfolders.
+        main_output_dict (dict): Nested dictionary containing simulation outputs.
+        molecule (str): Formula of the target chemical species (e.g., 'CO').
+        itime (int): Index of the simulation timestep to plot. Defaults to -1.
+        threshold (float or list/tuple): Percentage level(s) for the graphic overlay.
+        overlay_color (str): Color of the contour line or hatched patterns.
+        verbose (bool): If True, prints missing file or parsing diagnostics.
+        xlim/ylim (tuple, optional): Custom limits for the R and z axes [AU].
+        rmin/rmax (float, optional): Inbound radial filtering constraints [AU].
+        colormap (str): Matplotlib colormap identifier. Defaults to 'RdYlBu_r'.
+    """
+    
+    chempath = Path(chempath)
+    AU_to_cm = 1.496e13  
+
+    # --- Internal formatting helper ---
+    def clean_molec(mol_name):
+        f = re.sub(r"(\d+)", r"_{\1}", mol_name)
+        f = re.sub(r"([+-]+)$", r"^{\1}", f)
+        return f"${f}$"
+
+    # --- Radial key harvesting and filtering ---
+    radii_map = {}
+    for original_key in main_output_dict.keys():
+        digits = re.findall(r'\d+', str(original_key))
+        if digits:
+            try:
+                radii_map[int(digits[0])] = original_key
+            except ValueError:
+                continue
+                
+    extracted_radii = sorted(list(radii_map.keys()))
+    
+    sorted_radii = []
+    for r in extracted_radii:
+        if rmin is not None and r < rmin: continue
+        if rmax is not None and r > rmax: continue
+        sorted_radii.append(r)
+
+    if not sorted_radii:
+        if verbose: print(f"No columns found within specified boundaries [rmin={rmin}, rmax={rmax}].")
+        return
+
+    disk_radii = []
+    max_z_encountered = 0.0
+
+    grid_all_z = []
+    scat_R = []
+    scat_Z = []
+    scat_Perc = []
+
+    # --- Reconstruct radial grid cell edges ---
+    if len(sorted_radii) > 1:
+        r_midshifts = 0.5 * np.diff(sorted_radii)
+        r_edges = [sorted_radii[0] - r_midshifts[0]] + [sorted_radii[i] + r_midshifts[i] for i in range(len(r_midshifts))] + [sorted_radii[-1] + r_midshifts[-1]]
+    else:
+        r_edges = [sorted_radii[0] - 0.5, sorted_radii[0] + 0.5]
+
+    # --- Parse physical and chemical profiles ---
+    for i, r_val in enumerate(sorted_radii):
+        file_path = chempath / f"{r_val}AU" / "1D_static.dat"
+        if not os.path.exists(file_path):
+            if verbose: print(f"File not found: {file_path}. Skipping radius.")
+            continue
+            
+        orig_key = radii_map[r_val]
+        sub_dict = main_output_dict[orig_key]
+        abundance_array = sub_dict['abundances']
+        nH_profile = sub_dict["H_number_density"][itime, :]  
+        available_species = abundance_array.coords['species'].values
+        
+        try:
+            z_points = np.loadtxt(file_path, comments='!', usecols=0)
+        except Exception as e:
+            if verbose: print(f"Error loading {file_path}: {e}")
+            continue
+            
+        grid_all_z.extend(list(z_points))
+
+        # Reconstruct vertical grid cell edges
+        if len(z_points) > 1:
+            z_midshifts = 0.5 * np.diff(z_points)
+            z_edges = [z_points[0] - z_midshifts[0]] + [z_points[j] + z_midshifts[j] for j in range(len(z_midshifts))] + [max(0.0, z_points[-1] + z_midshifts[-1])]
+            dz_cells = np.abs(np.diff(z_edges))
+        else:
+            z_edges = [max(0.0, z_points[0] - 0.5), z_points[0] + 0.5]
+            dz_cells = np.array([1.0])
+            
+        max_z_encountered = max(max_z_encountered, max(z_edges))
+        disk_radii.append(r_val)
+        
+        # Determine cell radial width and center in cm
+        r_left, r_right = r_edges[i], r_edges[i+1]
+        dR = (r_right - r_left) * AU_to_cm
+        R_center = float(r_val) * AU_to_cm
+        
+        # Identify gas and solid phase tokens for all size bins
+        gas_name = molecule
+        ice_names = []
+        for sp in available_species:
+            if sp.endswith(molecule) and (sp.startswith('J') or sp.startswith('K')):
+                if re.match(r'^[JK]\d+' + re.escape(molecule) + r'$', sp):
+                    ice_names.append(sp)
+
+        y_abundances = abundance_array.isel(time=itime)
+
+        # Calculate absolute gas populations integrated over cell volumes
+        for j in range(len(z_points)):
+            dz = dz_cells[j] * AU_to_cm
+            cell_volume = 2 * np.pi * R_center * dR * dz
+            nH_local = float(nH_profile[j])
+            
+            y_gas = float(y_abundances.sel(species=gas_name).values[j]) if gas_name in available_species else 0.0
+            
+            y_ice = 0.0
+            for ice_sp in ice_names:
+                y_ice += float(y_abundances.sel(species=ice_sp).values[j])
+                
+            n_abs_gas = y_gas * nH_local * cell_volume
+            n_abs_ice = y_ice * nH_local * cell_volume
+            total_particles = n_abs_gas + n_abs_ice
+            
+            if total_particles > 0.0:
+                gas_percentage = (n_abs_gas / total_particles) * 100.0
+            else:
+                gas_percentage = 100.0
+
+            scat_R.append(r_val)
+            scat_Z.append(z_points[j])
+            scat_Perc.append(gas_percentage)
+
+    if not scat_R:
+        if verbose: print("No spatial nodes successfully generated.")
+        return
+
+    scat_R = np.array(scat_R)
+    scat_Z = np.array(scat_Z)
+    scat_Perc = np.array(scat_Perc)
+    disk_radii_arr = np.array(disk_radii)
+
+    # --- Plot setup ---
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+
+    # Generate a fine regular grid for 2D interpolation
+    grid_R, grid_Z = np.meshgrid(
+        np.linspace(disk_radii_arr.min(), disk_radii_arr.max(), 400),
+        np.linspace(min(grid_all_z), max(grid_all_z), 400)
+    )
+
+    # Use linear interpolation for the background to suppress numerical overshoot artifacts
+    grid_Percentage = griddata((scat_R, scat_Z), scat_Perc, (grid_R, grid_Z), method='linear')
+
+    contour_levels = np.linspace(0.0, 100.0, 101)
+    color_norm = plt.cm.colors.Normalize(vmin=0.0, vmax=100.0)
+
+    # Render background color fields
+    cf = ax.contourf(grid_R, grid_Z, grid_Percentage, levels=contour_levels, cmap=colormap, norm=color_norm, extend='both')
+    
+    cb = fig.colorbar(cf, ax=ax, label=f"Gas-phase Fraction [ % of Total {clean_molec(molecule)} (Gas+J+K) ]", 
+                      ticks=np.linspace(0, 100, 11), extendfrac=0)
+
+    # Use cubic interpolation strictly for smoother contour lines
+    grid_Percentage_smooth = griddata((scat_R, scat_Z), scat_Perc, (grid_R, grid_Z), method='cubic')
+
+    # --- Render overlays and legends ---
+    try:
+        # Case 1: Sequence threshold passed -> Hatched region implementation
+        if isinstance(threshold, (list, tuple)) and len(threshold) == 2:
+            t_low = float(min(threshold))
+            t_high = float(max(threshold))
+            
+            cs_zone = ax.contourf(grid_R, grid_Z, grid_Percentage_smooth, 
+                                  levels=[t_low, t_high], 
+                                  colors='none',      
+                                  hatches=['////'])   
+            
+            # Version-agnostic loop to set custom hatch edge color
+            if hasattr(cs_zone, 'collections') and cs_zone.collections:
+                target_collections = cs_zone.collections
+            elif hasattr(cs_zone, 'artists') and cs_zone.artists:
+                target_collections = cs_zone.artists
+            else:
+                target_collections = [ax.collections[-1]]
+                
+            for col in target_collections:
+                col.set_edgecolor(overlay_color)
+                col.set_linewidth(0.5) 
+            
+            hatch_patch = plt.Rectangle((0, 0), 1, 1, fill=False, 
+                                        edgecolor=overlay_color, 
+                                        hatch='////', linewidth=0.5)
+            
+            ax.legend(handles=[hatch_patch], 
+                      labels=[f'Transition Zone ({t_low:.0f}% - {t_high:.0f}% Gas)'], 
+                      loc='upper right', frameon=True, fontsize=10)
+            
+        # Case 2: Scalar threshold passed -> Solid line implementation
+        else:
+            t_val = float(threshold)
+            cs_line = ax.contour(grid_R, grid_Z, grid_Percentage_smooth, 
+                                 levels=[t_val], 
+                                 colors=overlay_color, 
+                                 linestyles='solid', 
+                                 linewidths=1.7)
+            
+            if hasattr(cs_line, 'legend_elements'):
+                artists, _ = cs_line.legend_elements()
+                h_item = artists[0]
+            elif hasattr(cs_line, 'collections') and cs_line.collections:
+                h_item = cs_line.collections[0]
+            else:
+                h_item = ax.collections[-1]
+                
+            ax.legend(handles=[h_item], 
+                      labels=[f'Snowline ({t_val:.0f}% Gas Fraction)'], 
+                      loc='upper right', frameon=True, fontsize=10)
+                
+    except Exception as e:
+        if verbose: print(f"Warning: Could not render threshold overlay structures. {e}")
+
+    # --- Axes properties and bounds ---
+    ax.set_xlabel('Disk Radius R [AU]', fontsize=11)
+    ax.set_ylabel('Altitude $z$ [AU]', fontsize=11)
+    ax.set_title(f"Gas-phase Volumetric Reservoir Distribution Map — {clean_molec(molecule)}", fontsize=12, fontweight='bold', pad=10)
+
+    ax.set_xlim(xlim if xlim is not None else (disk_radii_arr.min(), disk_radii_arr.max()))
+    ax.set_ylim(ylim if ylim is not None else (0.0, max_z_encountered))
+    ax.grid(True, linestyle=":", alpha=0.3)
+    ax.tick_params(labelsize=11)
+
+    try:
+        sample_orig_key = radii_map[disk_radii[0]]
+        time_seconds = main_output_dict[sample_orig_key]['abundances'].coords['time'].values[itime]
+        fig.suptitle(f'Vertical Cross-section Curve — $t = {time_seconds/3.156e7:.0f}$ years', fontsize=11, fontweight='bold', y=0.99)
+    except:
+        pass
+
+    plt.tight_layout()
+    plt.show()

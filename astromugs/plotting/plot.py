@@ -3665,13 +3665,7 @@ def plot_grain_properties_midplane(chempath,
     # Apply rmin and rmax spatial filters
     sorted_radii = []
     for r in extracted_radii:
-        if rmin is not None and r < rmin: continue
-        if rmax is not None and r > rmax: continue
-        sorted_radii.append(r)
-
-    if not sorted_radii:
-        if verbose: print(f"No columns found within specified boundaries [rmin={rmin}, rmax={rmax}].")
-        return
+        sorted_radii.append(r) 
 
     disk_radii = []
     grain_sizes_matrix = []

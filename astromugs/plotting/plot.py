@@ -18,7 +18,7 @@ from scipy.interpolate import griddata
 
 import re
 from matplotlib.collections import PolyCollection
-
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
@@ -960,30 +960,48 @@ def numberdens(species='CO', path='thermal/', vmin=1e0, vmax=1e8, cmap='gnuplot2
     plt.show()
 
 
-def plot_gas_velocity(path='thermal/', vmin=0.0, vmax=10.0, cmap='viridis',
-                      logscale=False, xlim=None, ylim=None, figsize=None,
-                      save=False, savename='gas_velocity.pdf'):
-    """Plot 2D map of Keplerian azimuthal velocity (v_phi) from ``gas_velocity.inp``.
+def plot_velocity_and_temperature(path='thermal/', 
+                                  vmin=0.0, vmax=10.0, logscale=False, cmap_v='viridis',
+                                  Tmin=10.0, Tmax=1000.0, logscale_T=True, cmap_T='inferno',
+                                  xlim=None, ylim=None, figsize=None,
+                                  save=False, savename='gas_properties.pdf'):
+    """Plot a 2D side-by-side comparison of gas velocity (v_phi) and gas temperature.
+
+    Extracts the azimuthal Keplerian velocity component from a 3D spherical 
+    velocity file and the thermal gas structure from a temperature file, both 
+    formatted for RADMC-3D line transfer calculations. Displays them as a 
+    meridional (R, Z) cross-section slice.
 
     Parameters
     ----------
     path : str, optional
-        Path to the directory containing the RADMC-3D files. Default is ``'thermal/'``.
+        Path to the directory containing the RADMC-3D input files. Default is 
+        ``'thermal/'``.
     vmin, vmax : float, optional
-        Colour scale limits for v_phi [km/s]. Default is ``0.0`` and ``10.0``.
-        Note : If logscale=True, please check that vmin > 0 (eg: vmin=0.1).
-    cmap : str, optional
-        Colormap name. Default is ``'viridis'``.
+        Colour scale limits for the azimuthal velocity v_phi [km/s]. Default 
+        is ``0.0`` and ``10.0``.
     logscale : bool, optional
-        If True, plot the velocity using a logarithmic color scale. Default is False.
+        If True, plot the velocity using a logarithmic color scale. Default 
+        is False.
+    cmap_v : str, optional
+        Colormap name for velocity field. Default is ``'viridis'``.
+    Tmin, Tmax : float, optional
+        Colour scale limits for gas kinetic temperature [K]. Default is 
+        ``10.0`` and ``1000.0``.
+    logscale_T : bool, optional
+        If True, plot the temperature using a logarithmic color scale. Default 
+        is True.
+    cmap_T : str, optional
+        Colormap name for the thermal structure. Default is ``'inferno'``.
     xlim, ylim : tuple, optional
-        Axis limits (R, Z) in AU.
+        Spatial axis limits (R, Z) in astronomical units [au], shared by 
+        both panels.
     figsize : tuple or None, optional
-        Figure size.
+        Figure dimensions. Default is ``(12, 5)`` for side-by-side layout.
     save : bool, optional
-        Save the figure to ``savename``. Default is False.
+        Save the rendered figure to ``savename``. Default is False.
     savename : str, optional
-        Output filename when ``save=True``. Default is ``'gas_velocity.pdf'``.
+        Output filename when ``save=True``. Default is ``'gas_properties.pdf'``.
     """
     # --- Grid: cell centres (shape nt × nr) ---
     grid = pd.read_table(path + 'amr_grid.inp', engine='python', skiprows=5)
@@ -991,62 +1009,99 @@ def plot_gas_velocity(path='thermal/', vmin=0.0, vmax=10.0, cmap='viridis',
     nt = int(grid.columns[0].split("  ")[1])
     grid = np.array(grid[grid.columns[0]].values, copy=True)
 
+    # Conversion of spherical radial grid boundaries from cm to au
     r_edge     = grid[:nr+1] / autocm
     theta_edge = grid[nr+1:nr+1+nt+1]
     theta_edge[-1] = np.pi
+    
+    # Calculation of cell centres from boundary edges via midpoints
     r_cen     = 0.5 * (r_edge[:-1]     + r_edge[1:])
     theta_cen = 0.5 * (theta_edge[:-1] + theta_edge[1:])
     rr, tt = np.meshgrid(r_cen, theta_cen)          # (nt, nr)
+    
+    # Transformation from spherical polar (r, theta) to cylindrical (R, Z) coordinates
     R = rr * np.sin(tt)
     Z = rr * np.cos(tt)
 
-    # --- Layout ---
     if figsize is None:
-        figsize = (6, 5)
+        figsize = (12, 5)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharex=True, sharey=True)
 
     if logscale:
-        if vmin <= 0:
-            print("Warning: vmin must be > 0 for logscale. Setting vmin to 1e-2")
-            vmin = 1e-2
-        norm = LogNorm(vmin=vmin, vmax=vmax)
+        if vmin <= 0: vmin = 1e-2
+        norm_v = LogNorm(vmin=vmin, vmax=vmax)
     else:
-        norm = Normalize(vmin=vmin, vmax=vmax)
+        norm_v = Normalize(vmin=vmin, vmax=vmax)
 
-    fig, ax = plt.subplots(figsize=figsize)
-
-    # --- Lecture de gas_velocity.inp ---
+    # RADMC-3D velocity file contains columns for (v_r, v_theta, v_phi)
     vel_data = pd.read_table(path + 'gas_velocity.inp', engine='python', 
                              header=None, skiprows=2, sep=r'\s+')
     
+    # Extracting the 3rd column (index 2) for v_phi and converting from cm/s to km/s
     vphi_all = vel_data[2].values / 1e5
+    
+    # Determining azimuthal grid size to reconstruct the nested loops (phi, theta, r)
     nphi = len(vphi_all) // (nt * nr)
     vphi_3d = vphi_all.reshape(nphi, nt, nr)
-    vphi_2d = vphi_3d[0, :, :]
+    vphi_2d = vphi_3d[0, :, :]  # Meridional slice at phi = 0
 
-    # --- Plot ---
-    im = ax.pcolormesh(R, Z, vphi_2d, cmap=cmap, shading='gouraud',
-                       norm=norm, rasterized=True)
+    im1 = ax1.pcolormesh(R, Z, vphi_2d, cmap=cmap_v, shading='gouraud',
+                         norm=norm_v, rasterized=True)
     
-    # Le titre s'adapte si on est en log
-    title_suffix = " (Log)" if logscale else ""
-    ax.set_title(f'Gas Azimuthal Velocity $v_\\phi${title_suffix}', fontsize=13)
-    ax.tick_params(labelsize=12)
+    title_v = r'Gas Velocity $v_\phi$ (Log)' if logscale else r'Gas Velocity $v_\phi$'
+    ax1.set_title(title_v, fontsize=13)
+    ax1.set_xlabel('R [au]', fontsize=12)
+    ax1.set_ylabel('Z [au]', fontsize=12)
+    ax1.tick_params(labelsize=11)
+
+    temp_data = pd.read_table(path + 'gas_temperature.inp', engine='python', 
+                              header=None, skiprows=2)
+    t_all = temp_data[0].values
     
+    # Reconstructing the 3D grid layout matching the nested cell indexing (phi, theta, r)
+    t_3d = t_all.reshape(nphi, nt, nr)
+    t_2d = t_3d[0, :, :]  # Meridional slice at phi = 0
+
+    if Tmin is None:
+        # Exclusion of unphysical values (<= 0) when evaluating bounds under LogNorm
+        Tmin = np.min(t_2d[t_2d > 0]) if logscale_T else np.min(t_2d)
+    if Tmax is None:
+        Tmax = np.max(t_2d)
+
+    if logscale_T:
+        if Tmin <= 0: 
+            Tmin = 1e-1
+        norm_T = LogNorm(vmin=Tmin, vmax=Tmax)
+    else:
+        norm_T = Normalize(vmin=Tmin, vmax=Tmax)
+
+    im2 = ax2.pcolormesh(R, Z, t_2d, cmap=cmap_T, shading='gouraud',
+                         norm=norm_T, rasterized=True)
+    
+    title_T = 'Gas Temperature'
+    ax2.set_title(title_T, fontsize=13)
+    ax2.set_xlabel('R [au]', fontsize=12)
+    ax2.tick_params(labelsize=11)
+
     if xlim:
-        ax.set_xlim(xlim)
+        ax1.set_xlim(xlim)
     if ylim:
-        ax.set_ylim(ylim)
+        ax1.set_ylim(ylim)
 
-    ax.set_xlabel('R [au]', fontsize=13)
-    ax.set_ylabel('Z [au]', fontsize=13)
+    divider1 = make_axes_locatable(ax1)
+    cax1 = divider1.append_axes("right", size="5%", pad=0.07)
+    fig.colorbar(im1, cax=cax1, label=r'$v_\phi$ [km s$^{-1}$]')
 
-    # Colorbar
-    fig.subplots_adjust(right=0.85)
-    cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])
-    fig.colorbar(im, cax=cbar_ax, label=r'$v_\phi$ [km s$^{-1}$]')
+    divider2 = make_axes_locatable(ax2)
+    cax2 = divider2.append_axes("right", size="5%", pad=0.07)
+    fig.colorbar(im2, cax=cax2, label=r'$T_{\rm gas}$ [K]')
+
+    fig.tight_layout()
 
     if save:
         fig.savefig(savename, bbox_inches='tight')
+
     plt.show()
 
 

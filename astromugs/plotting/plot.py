@@ -1047,6 +1047,7 @@ def plot_gas_velocity(path='thermal/', vmin=0.0, vmax=10.0, cmap='viridis',
 
     if save:
         fig.savefig(savename, bbox_inches='tight')
+    plt.show()
 
 
 def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='gnuplot2',

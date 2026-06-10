@@ -960,6 +960,95 @@ def numberdens(species='CO', path='thermal/', vmin=1e0, vmax=1e8, cmap='gnuplot2
     plt.show()
 
 
+def plot_gas_velocity(path='thermal/', vmin=0.0, vmax=10.0, cmap='viridis',
+                      logscale=False, xlim=None, ylim=None, figsize=None,
+                      save=False, savename='gas_velocity.pdf'):
+    """Plot 2D map of Keplerian azimuthal velocity (v_phi) from ``gas_velocity.inp``.
+
+    Parameters
+    ----------
+    path : str, optional
+        Path to the directory containing the RADMC-3D files. Default is ``'thermal/'``.
+    vmin, vmax : float, optional
+        Colour scale limits for v_phi [km/s]. Default is ``0.0`` and ``10.0``.
+        Note : If logscale=True, please check that vmin > 0 (eg: vmin=0.1).
+    cmap : str, optional
+        Colormap name. Default is ``'viridis'``.
+    logscale : bool, optional
+        If True, plot the velocity using a logarithmic color scale. Default is False.
+    xlim, ylim : tuple, optional
+        Axis limits (R, Z) in AU.
+    figsize : tuple or None, optional
+        Figure size.
+    save : bool, optional
+        Save the figure to ``savename``. Default is False.
+    savename : str, optional
+        Output filename when ``save=True``. Default is ``'gas_velocity.pdf'``.
+    """
+    # --- Grid: cell centres (shape nt × nr) ---
+    grid = pd.read_table(path + 'amr_grid.inp', engine='python', skiprows=5)
+    nr = int(grid.columns[0].split("  ")[0])
+    nt = int(grid.columns[0].split("  ")[1])
+    grid = np.array(grid[grid.columns[0]].values, copy=True)
+
+    r_edge     = grid[:nr+1] / autocm
+    theta_edge = grid[nr+1:nr+1+nt+1]
+    theta_edge[-1] = np.pi
+    r_cen     = 0.5 * (r_edge[:-1]     + r_edge[1:])
+    theta_cen = 0.5 * (theta_edge[:-1] + theta_edge[1:])
+    rr, tt = np.meshgrid(r_cen, theta_cen)          # (nt, nr)
+    R = rr * np.sin(tt)
+    Z = rr * np.cos(tt)
+
+    # --- Layout ---
+    if figsize is None:
+        figsize = (6, 5)
+
+    if logscale:
+        if vmin <= 0:
+            print("Warning: vmin must be > 0 for logscale. Setting vmin to 1e-2")
+            vmin = 1e-2
+        norm = LogNorm(vmin=vmin, vmax=vmax)
+    else:
+        norm = Normalize(vmin=vmin, vmax=vmax)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # --- Lecture de gas_velocity.inp ---
+    vel_data = pd.read_table(path + 'gas_velocity.inp', engine='python', 
+                             header=None, skiprows=2, sep=r'\s+')
+    
+    vphi_all = vel_data[2].values / 1e5
+    nphi = len(vphi_all) // (nt * nr)
+    vphi_3d = vphi_all.reshape(nphi, nt, nr)
+    vphi_2d = vphi_3d[0, :, :]
+
+    # --- Plot ---
+    im = ax.pcolormesh(R, Z, vphi_2d, cmap=cmap, shading='gouraud',
+                       norm=norm, rasterized=True)
+    
+    # Le titre s'adapte si on est en log
+    title_suffix = " (Log)" if logscale else ""
+    ax.set_title(f'Gas Azimuthal Velocity $v_\\phi${title_suffix}', fontsize=13)
+    ax.tick_params(labelsize=12)
+    
+    if xlim:
+        ax.set_xlim(xlim)
+    if ylim:
+        ax.set_ylim(ylim)
+
+    ax.set_xlabel('R [au]', fontsize=13)
+    ax.set_ylabel('Z [au]', fontsize=13)
+
+    # Colorbar
+    fig.subplots_adjust(right=0.85)
+    cbar_ax = fig.add_axes([0.87, 0.15, 0.03, 0.7])
+    fig.colorbar(im, cax=cbar_ax, label=r'$v_\phi$ [km s$^{-1}$]')
+
+    if save:
+        fig.savefig(savename, bbox_inches='tight')
+
+
 def static(chempath='chemistry/', column='nH', vmin=1, vmax=50, iso=None, cmap='gnuplot2',
            xlim=None, ylim=None, figsize=(6, 6), save=False, savename='filename.pdf'):
     """Plot a 2D map of a column from the 1D_static.dat files.

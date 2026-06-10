@@ -22,7 +22,7 @@ from matplotlib.collections import PolyCollection
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
-
+from matplotlib.colors import Normalize, LogNorm
 from astromugs.constants.constants import autocm
 
 

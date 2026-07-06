@@ -1634,6 +1634,7 @@ def moment_map(image_folder,
                zoom_window=None,
                vmin=None,         
                vmax=None,
+               chanels='',
                beam=True
                ):
     """
@@ -1665,6 +1666,8 @@ def moment_map(image_folder,
         Manual lower data limit threshold anchor assigned to the active colormap.
     vmax : float, optional
         Manual upper data limit threshold anchor assigned to the active colormap.
+    chanels : list, default is ''
+        Allow to choose the channels on which the integration is computed
     beam : bool, default True
         If True, overlays an ellipse patch representing the telescope's synthesized beam.
 
@@ -1701,7 +1704,7 @@ def moment_map(image_folder,
     immoments(
         imagename=fits_input,   
         moments=[m],    
-        chans='',    # Process all available spectral channels
+        chans=chanels,    # Process all available spectral channels
         outfile=casa_im_out
     )
     

@@ -7,7 +7,7 @@ Created on Fri Jun 12 16:42:35 2026
 
 import astromugs.pipeline as pipeline
 
-from casatasks import simobserve, importfits, concat, tclean, exportfits, mmoments
+from casatasks import simobserve, importfits, concat, tclean, exportfits, immoments
 
 import radmc3dPy as r3d
 
